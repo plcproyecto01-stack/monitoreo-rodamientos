@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+altair
+scipy
+openpyxl
+python-docx
+matplotlib
+requests
