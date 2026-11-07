@@ -1109,11 +1109,14 @@ h3 { border-left:5px solid var(--electrico); padding-left:.6rem !important; }
 .ds th { text-align:left; background:#E4ECF8; color:var(--marino); padding:.45rem .7rem; width:38%; }
 .ds td { padding:.45rem .7rem; border-bottom:1px solid #EDF2FA; color:#24324d; }
 .st-key-nav [role="radiogroup"] { gap:.35rem; flex-wrap:wrap; background:#fff; padding:.45rem; border-radius:12px; box-shadow:0 2px 10px rgba(10,31,68,.08); }
-.st-key-nav label[data-baseweb="radio"] { margin:0; padding:.38rem .8rem; border-radius:20px; border:1px solid #D5E2F5; background:#F4F7FC; }
-.st-key-nav label[data-baseweb="radio"] > div:first-child { display:none; }
-.st-key-nav label[data-baseweb="radio"]:has(input:checked) { background:linear-gradient(120deg, var(--marino-2), var(--electrico)); border-color:transparent; }
-.st-key-nav label[data-baseweb="radio"]:has(input:checked) p { color:#fff !important; }
-.st-key-nav p { font-weight:600; color:var(--marino); font-size:.9rem; }
+.st-key-nav [role="radiogroup"] > label { margin:0 !important; padding:.38rem .85rem !important; border-radius:20px; border:1px solid #D5E2F5; background:#F4F7FC; cursor:pointer; }
+.st-key-nav [role="radiogroup"] > label > div:first-child { display:none !important; }
+.st-key-nav [role="radiogroup"] > label:has(input:checked) { background:linear-gradient(120deg, var(--marino-2), var(--electrico)); border-color:transparent; }
+.st-key-nav [role="radiogroup"] > label:has(input:checked) * { color:#fff !important; }
+.st-key-nav [role="radiogroup"] > label p { font-weight:600; color:var(--marino); font-size:.9rem; margin:0; }
+[data-testid="stSidebar"] button { background:rgba(255,255,255,.12) !important; border:1px solid rgba(255,255,255,.35) !important; }
+[data-testid="stSidebar"] button:hover { background:rgba(255,255,255,.22) !important; border-color:#F2B705 !important; }
+[data-testid="stSidebar"] button * { color:#fff !important; }
 .diag { background:#fff; border-radius:12px; padding:.9rem 1.1rem; margin:.5rem 0 .9rem; border-left:6px solid var(--rayo); box-shadow:0 2px 10px rgba(10,31,68,.07); }
 .diag.critico { border-left-color:#D64545; }
 .diag h4 { margin:0 0 .2rem; color:var(--marino); font-size:1.05rem; }
@@ -1129,7 +1132,7 @@ h3 { border-left:5px solid var(--electrico); padding-left:.6rem !important; }
   .hero-banda { padding:1rem 1rem .9rem; } .hero-banda h1 { font-size:1.3rem; } .hero-banda p.sub { font-size:.85rem; }
   .hero-banda::after { font-size:4rem; bottom:-1rem; }
   .hero-fichas { padding:.6rem .8rem .8rem; gap:.5rem; }
-  .st-key-nav label[data-baseweb="radio"] { padding:.3rem .6rem; } .st-key-nav p { font-size:.8rem; }
+  .st-key-nav [role="radiogroup"] > label { padding:.3rem .6rem !important; } .st-key-nav [role="radiogroup"] > label p { font-size:.8rem; }
   .luz .v { font-size:1.1rem; }
 }
 .pie { margin-top:2rem; padding:1rem 1.4rem; border-radius:12px; text-align:center; background:var(--marino); color:#CFE1FF; font-size:.85rem; }
