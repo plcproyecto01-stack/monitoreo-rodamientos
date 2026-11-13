@@ -83,6 +83,16 @@ h3 { border-left:5px solid var(--electrico); padding-left:.6rem !important; }
   .st-key-nav [role="radiogroup"] > label { padding:.3rem .6rem !important; } .st-key-nav [role="radiogroup"] > label p { font-size:.8rem; }
   .luz .v { font-size:1.1rem; }
 }
+.kvgrid { display:grid; gap:.35rem .9rem; }
+.kv { display:flex; justify-content:space-between; gap:.6rem; border-bottom:1px dashed #E1E8F4; padding:.25rem 0; font-size:.92rem; }
+.kv span { color:#5A6B88; } .kv b { color:var(--marino); text-align:right; }
+.ruta { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:.8rem; margin:.4rem 0 1rem; }
+.paso { background:#fff; border-radius:12px; padding:1rem 1.1rem; border-top:5px solid var(--electrico); box-shadow:0 2px 10px rgba(10,31,68,.08); }
+.paso .n { display:inline-block; background:var(--marino); color:#fff; border-radius:50%; width:1.7rem; height:1.7rem; text-align:center; line-height:1.7rem; font-weight:800; margin-right:.4rem; }
+.paso h4 { display:inline; color:var(--marino); font-size:1.02rem; }
+.paso .big { font-size:1.3rem; font-weight:800; color:var(--marino); margin:.5rem 0 .2rem; }
+.paso p { margin:.2rem 0 0; color:#3B4A66; font-size:.9rem; }
+.paso.fin { border-top-color:var(--rayo); background:linear-gradient(160deg,#fff 60%,#FFF7DD); }
 .chip { display:inline-block; padding:.2rem .7rem; border-radius:20px; color:#fff; font-weight:700; font-size:.85rem; }
 .caja { background:#fff; border:1px solid #D5E2F5; border-radius:12px; padding:.8rem 1rem; margin:.3rem 0 .8rem; }
 .caja h4 { margin:0 0 .4rem; color:var(--marino); font-size:1rem; }

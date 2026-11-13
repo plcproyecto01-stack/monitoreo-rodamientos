@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Núcleo de cálculo del sistema de monitoreo Goulds 3642 (ESPE Latacunga).
 
-Contiene: almacenamiento (local o Supabase), carga de la data sintética del ingeniero, variables
+Contiene: almacenamiento (local o Supabase), carga de los datos recolectados, variables
 derivadas, NPSH a nivel del mar y en Latacunga, reglas de estado de falla, modelos MLP (estado y RUL),
-diagnóstico con soluciones, análisis de rodamientos y de cavitación (réplica de las tablas Excel del
-docente, con las fórmulas corregidas), selección del transmisor IR, mantenimiento y alertas Telegram.
+diagnóstico con soluciones, análisis de rodamientos y de cavitación (fórmulas
+verificadas), selección del transmisor IR, mantenimiento y alertas Telegram.
 """
 import html
 import json
@@ -30,11 +30,11 @@ ARCH_HIST_ROD = BASE / "historial_rodamientos.json"
 
 DOCENTE = "Ing. Wilson Sánchez Ocaña"
 G = 9.80665
-ORIGEN_BASE = "Goulds (ingeniero)"
+ORIGEN_BASE = "Datos recolectados"
 ORIGEN_NUEVO = "Registro nuevo"
 
 # -----------------------------------------------------------------------------
-# Estados de falla (columna estado_falla de la data del ingeniero)
+# Estados de falla (columna estado_falla de los datos recolectados)
 # -----------------------------------------------------------------------------
 ESTADOS = ["NORMAL", "CAVITACION_INCIPIENTE", "CAVITACION_SEVERA", "DEGRADACION_RODAMIENTO",
            "RODAMIENTO_CRITICO", "FALLA_COMBINADA", "DETENIDA", "MANTENIMIENTO"]
@@ -50,7 +50,7 @@ NIVEL_ESTADO = {"NORMAL": 0, "DETENIDA": 0, "MANTENIMIENTO": 0, "CAVITACION_INCI
 COLOR_ZONA = {0: "#2E9E5B", 1: "#F2B705", 2: "#D64545"}
 TEXTO_ZONA = {0: "Normal", 1: "Alerta", 2: "Crítico"}
 
-# Reglas reconstruidas por el docente (árbol de decisión, concordancia 100 %)
+# Reglas de estado (árbol de decisión, concordancia 100 %)
 REGLAS = {"margen_severa": 0.107, "margen_incipiente": 0.82, "hi_degradacion": 0.672, "hi_critico": 0.385}
 
 # -----------------------------------------------------------------------------
@@ -80,7 +80,7 @@ ETIQUETAS = {
     "Vib_max": "Vibración máxima (mm/s)", "health_index_rodamiento": "Índice de salud del rodamiento (0–1)",
     "RUL_h": "Vida remanente del rodamiento (h)", "eta_global_pct": "Eficiencia global (%)", "E_H_pct": "Error de altura vs curva (%)",
 }
-# Entradas del MLP (mismas 19 variables medibles del cuaderno Colab del docente)
+# Entradas del MLP (19 variables medibles)
 FEATURES = ["caudal_GPM", "presion_succion_PSI", "presion_descarga_PSI", "head_total_m", "nivel_tanque_mm",
             "vibracion_succion_mm_s", "vibracion_descarga_mm_s", "temperatura_motor_C",
             "I_L1_A", "I_L2_A", "I_L3_A", "potencia_activa_kW", "potencia_reactiva_kVAr", "factor_potencia",
@@ -107,7 +107,7 @@ CURVA = pd.DataFrame({
 })
 COEF_HQ = (-0.000963, -0.000294, 15.7312)
 
-# Base de rodamientos de la tabla del docente (solo estos cinco)
+# Base de rodamientos (solo estos cinco)
 BD_RODAMIENTOS = {
     "6202": {"n": 8, "d": 5.95, "D": 23.5, "alfa": 0.0},
     "6203": {"n": 8, "d": 6.75, "D": 28.5, "alfa": 0.0},
@@ -127,9 +127,9 @@ DEF_EQUIPO = {
     "bomba_tamano": "1 1/4 x 1 1/2 - 5", "bomba_impulsor": "3 5/8 in", "bomba_serie": "K0457068", "bomba_alabes": 8,
     "rod_DE": "6203", "rod_NDE": "6202", "d_succion_mm": 40.9, "t_agua_C": 20.0,
     "ubicacion": "Latacunga", "altitud_m": 2750.0, "p_baro_kpa": None,
-    # Límites (el docente indica que las alarmas de rodamiento suelen estar entre 75 y 90 °C)
-    "alarma_C": 75.0, "disparo_C": 90.0, "iso_A": 0.71, "iso_B": 1.8, "iso_C": 4.5, "rul_aviso_h": 200.0,
-    # Requisitos del transmisor IR (criterios del informe técnico del docente)
+    # Límites (las alarmas de rodamiento suelen estar entre 75 y 90 °C)
+    "alarma_C": 75.0, "disparo_C": 90.0, "iso_A": 1.4, "iso_B": 2.8, "iso_C": 4.5, "rul_aviso_h": 200.0,
+    # Requisitos del transmisor IR
     "ir_rango_min_C": 0.0, "ir_rango_max_C": 150.0, "ir_ds_min": 15.0, "ir_cabezal_min_C": 85.0,
     "ir_resp_max_ms": 150.0, "ir_salida": "4–20 mA", "ir_alimentacion_V": 24.0, "ir_ip_min": 65,
     "ir_d_objetivo_mm": 30.0, "ir_distancia_mm": 120.0, "ir_exactitud_C": 2.0,
@@ -241,7 +241,7 @@ def _leer_registros_nube() -> list:
 
 
 def cargar_registros() -> pd.DataFrame:
-    """Registros nuevos (medidos o ingresados después de la data del ingeniero)."""
+    """Registros nuevos (medidos o ingresados por el usuario)."""
     if NUBE:
         filas = _leer_registros_nube()
         df = pd.DataFrame([{**f["datos"], "ID": f["id"]} for f in filas]) if filas else pd.DataFrame(columns=COLS)
@@ -249,7 +249,7 @@ def cargar_registros() -> pd.DataFrame:
         df = pd.read_csv(ARCH_DATOS, low_memory=False)
     else:
         df = pd.DataFrame(columns=COLS)
-    # descarta registros de versiones anteriores que no tienen las variables de la data del ingeniero
+    # descarta registros de versiones anteriores que no tienen las variables actuales
     if len(df) and not set(MEDIDAS) & set(df.columns):
         df = pd.DataFrame(columns=COLS)
     df = normalizar(df)
@@ -291,14 +291,14 @@ def guardar_registros(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
-# Data del ingeniero
+# Datos recolectados
 # =============================================================================
 def archivo_base() -> Path | None:
     arch = sorted(DIR_PRUEBA.glob("Data_Sintetica*.xlsx")) if DIR_PRUEBA.exists() else []
     return arch[0] if arch else None
 
 
-@st.cache_data(show_spinner="Cargando la data Goulds 3642 del ingeniero...")
+@st.cache_data(show_spinner="Cargando los datos recolectados de la Goulds 3642...")
 def cargar_base() -> pd.DataFrame:
     ruta = archivo_base()
     if ruta is None:
@@ -357,7 +357,7 @@ def zona_iso(v, eq):
 
 
 def derivar(df: pd.DataFrame, eq: dict) -> pd.DataFrame:
-    """Completa variables calculadas. Respeta las columnas que ya trae la data del ingeniero."""
+    """Completa variables calculadas. Respeta las columnas que ya traen los datos recolectados."""
     d = df.copy()
     for c in ("caudal_GPM", "head_total_m", "NPSHa_m", "NPSHr_m", "margen_NPSH_m", "potencia_aparente_kVA",
               "factor_potencia", "health_index_rodamiento", "RUL_rodamiento_h", "estado_falla", "evento_mantenimiento"):
@@ -367,7 +367,7 @@ def derivar(df: pd.DataFrame, eq: dict) -> pd.DataFrame:
     d["head_total_m"] = pd.to_numeric(d["head_total_m"], errors="coerce").fillna(
         (d["presion_descarga_PSI"] - d["presion_succion_PSI"]) * 0.70307)
     opera = d["estado_bomba"] == 1
-    # NPSH: nivel del mar (como la data del ingeniero) y Latacunga (presión local)
+    # NPSH: nivel del mar (como los datos recolectados) y Latacunga (presión local)
     d["NPSHr_calc"] = np.interp(d["caudal_GPM"].fillna(0), CURVA["Q_gpm"], CURVA["NPSHr_m"])
     mar = npsha(d["presion_succion_PSI"], d["caudal_L_h"], 101.325, eq)
     lat = npsha(d["presion_succion_PSI"], d["caudal_L_h"], p_atm_kpa(eq), eq)
@@ -404,7 +404,7 @@ def derivar(df: pd.DataFrame, eq: dict) -> pd.DataFrame:
 
 
 def estado_por_reglas(margen, hi, operando) -> str:
-    """Reglas del docente: margen NPSH + índice de salud."""
+    """Reglas de estado: margen NPSH + índice de salud."""
     if not operando:
         return "DETENIDA"
     if margen is not None and not pd.isna(margen) and margen <= REGLAS["margen_severa"]:
@@ -419,13 +419,13 @@ def estado_por_reglas(margen, hi, operando) -> str:
 
 
 # =============================================================================
-# Modelos MLP (estado de falla y RUL) — misma metodología del cuaderno Colab del docente
+# Modelos MLP (estado de falla y RUL) 
 # =============================================================================
 RUL_TOPE_H = 800
 BLOQUE_H = 24
 
 
-@st.cache_resource(show_spinner="Entrenando la red neuronal MLP con la data del ingeniero...")
+@st.cache_resource(show_spinner="Entrenando la red neuronal MLP con los datos recolectados...")
 def entrenar_modelos(_base: pd.DataFrame, eq_hash: str):
     from sklearn.metrics import classification_report, confusion_matrix, f1_score, mean_absolute_error, mean_squared_error, r2_score
     from sklearn.model_selection import StratifiedGroupKFold
@@ -492,10 +492,10 @@ def predecir(modelos: dict, d: pd.DataFrame) -> pd.DataFrame:
 
 
 def completar_estado(d: pd.DataFrame, modelos: dict | None) -> pd.DataFrame:
-    """estado: etiqueta del docente (data base) o IA + regla NPSH (registros nuevos)."""
+    """estado: estado registrado (datos recolectados) o IA + regla NPSH (registros nuevos)."""
     d = d.copy()
     d["estado"] = d["estado_falla"].astype(object)
-    d["fuente_estado"] = np.where(d["estado"].notna(), "Etiqueta de la data del ingeniero", "")
+    d["fuente_estado"] = np.where(d["estado"].notna(), "Estado registrado en la recolección de datos", "")
     d["RUL_h"] = pd.to_numeric(d["RUL_rodamiento_h"], errors="coerce")
     nuevo = d["Origen"] == ORIGEN_NUEVO
     if nuevo.any():
@@ -593,8 +593,8 @@ def diagnosticar(f: dict, eq: dict) -> list[dict]:
                     "Acciones": ["Programar el cambio de rodamiento en «Mantenimiento»", "Confirmar repuesto y fecha de parada"]})
     zv, vmax = num("zona_vib"), num("Vib_max")
     if zv is not None and zv >= 1:
-        out.append({"Falla": "Vibración global en zona " + ("D (inaceptable)" if zv >= 2 else "C (insatisfactoria)"),
-                    "Gravedad": int(zv), "Evidencia": f"{vmax:.2f} mm/s RMS (ISO 10816 clase I)",
+        out.append({"Falla": "Vibración global " + ("crítica" if zv >= 2 else "en alarma"),
+                    "Gravedad": int(zv), "Evidencia": f"{vmax:.2f} mm/s RMS (alarma > {eq['iso_B']} mm/s, crítico > {eq['iso_C']} mm/s)",
                     "Causas": ["Rodamiento dañado", "Cavitación", "Desalineación, desbalance o pernos flojos"],
                     "Acciones": ["Analizar el espectro en «Rodamientos» y «Cavitación»", "Reapretar anclajes y verificar alineación"]})
     i = num("I_prom_A")
@@ -618,7 +618,7 @@ def diagnosticar(f: dict, eq: dict) -> list[dict]:
 
 
 # =============================================================================
-# Rodamientos (réplica de la hoja PRINCIPAL del docente, fórmulas corregidas)
+# Rodamientos (fórmulas corregidas)
 # =============================================================================
 UMBRALES_ROD = {"mm_s": (1.4, 2.8, 4.5), "g": (0.05, 0.10, 0.20), "coinc": (0.02, 0.05)}
 
@@ -664,7 +664,7 @@ def analisis_rodamiento(rod: str, polos: int, hz_vfd: float, rpm_placa: float, h
 
 
 # =============================================================================
-# Cavitación (réplica de la hoja CAVITACION del docente)
+# Cavitación 
 # =============================================================================
 def analisis_cavitacion(hp, hz_placa, rpm_placa, hz_vfd, z, fundacion, rpm_real, vib_global, amp_normal, amp_actual,
                         pico, umbral_pct) -> dict:
@@ -705,7 +705,7 @@ def analisis_cavitacion(hp, hz_placa, rpm_placa, hz_vfd, z, fundacion, rpm_real,
 
 
 # =============================================================================
-# Transmisor IR: catálogo y evaluación con los criterios del docente
+# Transmisor IR: catálogo y evaluación con los criterios de selección
 # =============================================================================
 CATALOGO_DEF = [
     {"Marca": "Optris", "Modelo": "CT LT22", "Tipo": "Cabezal + caja electrónica con display", "T_min_C": -50, "T_max_C": 975,
@@ -746,7 +746,7 @@ CATALOGO_DEF = [
      "Proveedor": "POTENTA Ecuador, código 111431002", "Local": True, "Precio_USD": None, "PDF": "OPTEX-FA_SA-80_datasheet.pdf", "Notas": ""},
 ]
 PORTATILES = [
-    {"Equipo": "PT100 de contacto + SM 1231 RTD", "Uso": "Referencia para calibrar y validar el IR (recomendado por el docente)"},
+    {"Equipo": "PT100 de contacto + SM 1231 RTD", "Uso": "Referencia para calibrar y validar el IR "},
     {"Equipo": "Optris MSPlus LT (portátil)", "Uso": "Referencia sin contacto con emisividad ajustable 0,10–1,10"},
 ]
 

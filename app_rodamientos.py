@@ -4,7 +4,7 @@ Monitoreo predictivo del conjunto motor Emerson P55CST-1247 + bomba Goulds 3642
 Universidad de las Fuerzas Armadas ESPE – Sede Latacunga | Ingeniería Electromecánica
 
 Archivos: app_rodamientos.py (pantallas), nucleo.py (cálculos), estilos.py, logos, .streamlit/,
-datos_prueba/ (data sintética del docente), catalogos/ (hojas de datos).
+datos_prueba/ (datos recolectados), catalogos/ (hojas de datos).
 Ejecutar en la PC:  python -m streamlit run app_rodamientos.py
 """
 import base64
@@ -177,13 +177,40 @@ except Exception as ex:
 
 base = N.cargar_base()
 if base.empty:
-    st.error("No se encontró la data sintética del ingeniero en la carpeta «datos_prueba».")
+    st.error("No se encontraron los datos recolectados en la carpeta «datos_prueba».")
     st.stop()
 dbase = N.derivar(base, equipo)
 modelos = N.entrenar_modelos(dbase, "v5")
 dbase = N.completar_estado(dbase, None)
 dreg = N.completar_estado(N.derivar(reg, equipo), modelos) if len(reg) else pd.DataFrame(columns=dbase.columns)
 dtodo = pd.concat([dbase, dreg], ignore_index=True)
+
+
+@st.cache_data(show_spinner=False)
+def modelo_automatico(_d: pd.DataFrame, clave: str) -> dict | None:
+    op = _d[_d["estado_bomba"] == 1]
+    cand = [c for c in N.CANDIDATAS if c not in ("horas_trabajo_acum_h", "margen_NPSH_m") and op[c].std() > 0]
+    corr = op[cand + ["T_F"]].astype(float).corr()
+    orden = corr["T_F"].drop("T_F").abs().sort_values(ascending=False).index
+    vars_x = []
+    for v in orden:
+        if all(abs(corr.at[v, u]) < 0.9 for u in vars_x):
+            vars_x.append(v)
+        if len(vars_x) == 3:
+            break
+    dm = op.dropna(subset=vars_x + ["T_F"]).sort_values("timestamp")
+    corte = int(len(dm) * 0.7)
+    r_val = N.regresion(dm[vars_x].iloc[:corte].values, dm["T_F"].iloc[:corte].values)
+    pred = np.column_stack([np.ones(len(dm)), dm[vars_x].values]) @ r_val["beta"]
+    rmse_v = math.sqrt(float(((dm["T_F"].values[corte:] - pred[corte:]) ** 2).mean()))
+    r = N.regresion(dm[vars_x].values, dm["T_F"].values)
+    return {"nombre": "Lineal (automático)", "objetivo": "T_F", "variables": vars_x, "terminos": vars_x,
+            "intercepto": float(r["beta"][0]), "coeficientes": [float(b) for b in r["beta"][1:]],
+            "ecuacion": N.ecuacion_texto("T(°F)", float(r["beta"][0]), r["beta"][1:], vars_x), "r2": r["r2"],
+            "rmse_F": r["rmse"], "rmse_validacion_F": rmse_v, "n": len(dm), "fecha": "calculado con los datos recolectados"}
+
+
+modelo_activo = modelo_temp or modelo_automatico(dbase, "v5")
 mant_estado = N.estado_mantenimiento(mant)
 mant_venc = mant_estado[mant_estado["nivel"] == 2].to_dict("records")
 
@@ -211,7 +238,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     filtro = st.radio("Datos a analizar", [N.ORIGEN_BASE, "Registros nuevos", "Todos"], index=0)
-    st.metric("Data del ingeniero", f"{len(dbase):,} h".replace(",", "."), f"{int((dbase['estado_bomba'] == 1).sum())} h en operación", delta_color="off")
+    st.metric("Datos recolectados", f"{len(dbase):,} h".replace(",", "."), f"{int((dbase['estado_bomba'] == 1).sum())} h en operación", delta_color="off")
     st.metric("Registros nuevos", len(dreg))
 
 d = {N.ORIGEN_BASE: dbase, "Registros nuevos": dreg, "Todos": dtodo}[filtro].copy()
@@ -219,8 +246,8 @@ dop = d[d["estado_bomba"] == 1].copy()
 req_ir = N.requisitos_ir(dop if len(dop) else dbase, equipo)
 tabla_ir = N.evaluar_catalogo(catalogo, req_ir)
 
-SECCIONES = ["🏠 Inicio", "➕ Registrar", "🩺 Diagnóstico", "⚙️ Rodamientos", "💧 Cavitación", "🧠 Estado y RUL",
-             "🛠️ Mantenimiento", "📊 Gráficas", "🔍 Modelo", "🎯 Estimador", "🌡️ Transmisor IR", "▶️ Simulación",
+SECCIONES = ["🏠 Inicio", "➕ Registro de datos", "🔍 Modelo", "🎯 Estimador", "🌡️ Transmisor IR", "📊 Gráficas",
+             "🩺 Diagnóstico", "🧠 Estado y RUL", "⚙️ Rodamientos", "💧 Cavitación", "🛠️ Mantenimiento", "▶️ Simulación",
              "📋 Datos", "🔔 Alertas", "⚙️ Configuración", "📄 Informe"]
 with st.container(key="nav"):
     nav = st.radio("Sección", SECCIONES, horizontal=True, label_visibility="collapsed", key="seccion")
@@ -247,7 +274,7 @@ def tarjetas_estado(f: dict) -> None:
         ("Vida remanente rodamiento", (f"{fmt(rul, 0)} h" + (" o más" if rul and rul >= N.RUL_TOPE_H - 1 else "")) if rul is not None and not pd.isna(rul) else "—",
          zr, f"aviso a {fmt(equipo['rul_aviso_h'], 0)} h"),
         ("Margen NPSH", f"{fmt(f.get('margen_NPSH_m'), 2)} m", zona_margen(f.get("margen_NPSH_m")), f"Latacunga: {fmt(f.get('margen_lat_m'), 2)} m"),
-        ("Vibración máxima", f"{fmt(f.get('Vib_max'), 2)} mm/s", f.get("zona_vib"), "ISO 10816 clase I"),
+        ("Vibración máxima", f"{fmt(f.get('Vib_max'), 2)} mm/s", f.get("zona_vib"), f"alarma > {fmt(equipo['iso_B'])} mm/s"),
         ("Carga del motor", f"{fmt(f.get('carga_pct'), 0)} %", f.get("zona_carga"), f"{fmt(f.get('I_prom_A'), 2)} A de {equipo['motor_i']} A"),
     ])
 
@@ -256,9 +283,27 @@ def tarjetas_estado(f: dict) -> None:
 # 🏠 Inicio
 # =============================================================================
 if nav == "🏠 Inicio":
-    st.subheader("Estado general del equipo")
+    st.subheader("Ruta del proyecto")
+    opb = dbase[dbase["estado_bomba"] == 1]
+    ok_ir = tabla_ir[tabla_ir["Cumple todo"]] if len(tabla_ir) else tabla_ir
+    sel = next((c for c in catalogo if len(ok_ir) and c["Modelo"] == ok_ir.iloc[0]["Modelo"]), None)
+    st.markdown(f"""<div class="ruta">
+<div class="paso"><span class="n">1</span><h4>Recolección de datos</h4>
+<div class="big">{len(dbase)} h registradas</div>
+<p>{len(opb)} h en operación, del {dbase['timestamp'].min()[:10]} al {dbase['timestamp'].max()[:10]}.</p>
+<p>17 variables medidas: proceso, vibración, temperatura IR y eléctricas.</p></div>
+<div class="paso"><span class="n">2</span><h4>Modelo matemático de temperatura</h4>
+<div class="big">R² = {fmt(modelo_activo['r2'], 3)} | error ±{fmt(modelo_activo['rmse_F'], 1)} °F</div>
+<p style="font-family:monospace;font-size:.8rem">{html.escape(modelo_activo['ecuacion'])}</p>
+<p>Temperatura del escudo del rodamiento estimada en °F a partir de las variables medidas.</p></div>
+<div class="paso fin"><span class="n">3</span><h4>Transmisor IR seleccionado</h4>
+<div class="big">{html.escape(sel['Marca'] + ' ' + sel['Modelo']) if sel else 'Ninguno cumple'}</div>
+<p>{f"D:S {fmt(sel['DS'], 0)}:1 · {sel['T_min_C']} a {sel['T_max_C']} °C · {sel['Salidas'].split(';')[0]} · cabezal {sel['Tcab_C']} °C" if sel else 'Revisar criterios'}</p>
+<p>Rango medido: {fmt(N.c_a_f(req_ir['t_max_obs_C'] or 0) if req_ir['t_max_obs_C'] else None)} °F máx. Requisito D:S ≥ {fmt(req_ir['ds_req'], 0)}:1.</p></div>
+</div>""", unsafe_allow_html=True)
+    st.subheader("Estado actual del equipo")
     if dop.empty:
-        st.info("No hay registros en operación en el conjunto seleccionado. Registra mediciones en «➕ Registrar».")
+        st.info("No hay registros en operación en el conjunto seleccionado. Registra mediciones en «➕ Registro de datos».")
     else:
         ult = dop.sort_values("timestamp").iloc[-1].to_dict()
         st.caption(f"Último registro en operación: {ult['timestamp']} ({ult['Origen']}). Horas acumuladas: {fmt(ult.get('horas_trabajo_acum_h'), 0)} h.")
@@ -285,9 +330,6 @@ if nav == "🏠 Inicio":
         c[1].altair_chart(alt.Chart(cuenta).mark_bar().encode(
             x="Horas:Q", y=alt.Y("Estado:N", sort="-x", title=None), color=alt.Color("Estado:N", scale=ESCALA_EST, legend=None),
             tooltip=["Estado", "Horas"]).properties(height=300), width="stretch")
-        ok = tabla_ir[tabla_ir["Cumple todo"]] if len(tabla_ir) else tabla_ir
-        if len(ok):
-            st.info(f"Transmisor IR recomendado según los criterios del docente: **{ok.iloc[0]['Marca']} {ok.iloc[0]['Modelo']}** (ver «🌡️ Transmisor IR»).")
 
 # =============================================================================
 # ➕ Registrar
@@ -302,75 +344,150 @@ CAMPOS_REG = [  # (clave, etiqueta, paso)
     ("potencia_activa_kW", "Potencia activa (kW)", 0.001), ("potencia_reactiva_kVAr", "Potencia reactiva (kVAr)", 0.001),
 ]
 
-if nav == "➕ Registrar":
-    st.subheader("Registrar una medición")
-    st.write("Solo se piden las variables que tiene la data del ingeniero. Caudal en GPM, altura, NPSH (con la presión de "
-             "Latacunga), potencia aparente, factor de potencia, desbalances, **estado de falla y vida remanente (RUL)** se calculan solos.")
-    for k, *_ in CAMPOS_REG:
-        st.session_state.setdefault(f"r_{k}", None)
-    if st.session_state.pop("limpiar_reg", False):
+def tabla_valores(pares, columnas=3) -> str:
+    celdas = "".join(f'<div class="kv"><span>{html.escape(k)}</span><b>{html.escape(v)}</b></div>' for k, v in pares)
+    return f'<div class="kvgrid" style="grid-template-columns:repeat(auto-fit,minmax({220 if columnas == 3 else 180}px,1fr))">{celdas}</div>'
+
+
+if nav == "➕ Registro de datos":
+    st.subheader("Registro de datos")
+    modo = st.radio("Modo", ["📄 Prueba con datos recolectados", "✏️ Nuevo registro"], horizontal=True, key="modo_reg", label_visibility="collapsed")
+    if modo.startswith("📄"):
+        st.caption("Cada prueba es una hora de operación de la recolección de datos, con todos los campos llenos. Los resultados se calculan "
+                   "al instante; esta vista no guarda nada. Para ingresar una medición propia usa «✏️ Nuevo registro».")
+        op_b = dbase[dbase["estado_bomba"] == 1].sort_values("timestamp")
+        c = st.columns([2, 1, 1, 1])
+        est_f = c[0].selectbox("Pruebas a mostrar", ["Todos"] + [e for e in N.ESTADOS if e not in ("DETENIDA", "MANTENIMIENTO")],
+                               format_func=lambda e: "Todas las pruebas" if e == "Todos" else f"Solo: {N.NOMBRE_ESTADO[e]}")
+        lista = op_b if est_f == "Todos" else op_b[op_b["estado"] == est_f]
+        n = len(lista)
+        if st.session_state.get("prueba_filtro") != est_f:
+            st.session_state["prueba_filtro"], st.session_state["prueba_i"] = est_f, 1
+        st.session_state.setdefault("prueba_i", 1)
+        if c[1].button("◀ Anterior", width="stretch") and st.session_state["prueba_i"] > 1:
+            st.session_state["prueba_i"] -= 1
+        if c[2].button("Siguiente ▶", width="stretch") and st.session_state["prueba_i"] < n:
+            st.session_state["prueba_i"] += 1
+        i = c[3].number_input(f"Prueba N° (1 a {n})", min_value=1, max_value=max(n, 1), step=1, key="prueba_i")
+        f = lista.iloc[int(i) - 1].to_dict()
+        st.markdown(f"#### Prueba N° {int(i)} de {n} &nbsp; {chip(f['estado'])}", unsafe_allow_html=True)
+        st.caption(f"Fecha y hora: {f['timestamp']} | Horas de trabajo acumuladas: {fmt(f['horas_trabajo_acum_h'], 0)} h | Bomba operando")
+        c = st.columns(3)
+        c[0].markdown('<div class="caja"><h4>Proceso</h4>' + tabla_valores([
+            ("Nivel del tanque", f"{fmt(f['nivel_tanque_mm'])} mm"), ("Caudal", f"{fmt(f['caudal_L_h'], 0)} L/h"),
+            ("Presión de succión", f"{fmt(f['presion_succion_PSI'], 3)} psi"), ("Presión de descarga", f"{fmt(f['presion_descarga_PSI'], 3)} psi")], 1)
+            + "</div>", unsafe_allow_html=True)
+        c[1].markdown('<div class="caja"><h4>Vibración y temperatura</h4>' + tabla_valores([
+            ("Vibración en succión", f"{fmt(f['vibracion_succion_mm_s'], 3)} mm/s"), ("Vibración en descarga", f"{fmt(f['vibracion_descarga_mm_s'], 3)} mm/s"),
+            ("Temperatura IR del escudo", f"{fmt(f['temperatura_motor_C'], 2)} °C = {fmt(f['T_F'], 1)} °F")], 1) + "</div>", unsafe_allow_html=True)
+        c[2].markdown('<div class="caja"><h4>Eléctricas</h4>' + tabla_valores([
+            ("Voltajes L1-L2 / L2-L3 / L3-L1", f"{fmt(f['V_L1L2_V'])} / {fmt(f['V_L2L3_V'])} / {fmt(f['V_L3L1_V'])} V"),
+            ("Corrientes L1 / L2 / L3", f"{fmt(f['I_L1_A'], 3)} / {fmt(f['I_L2_A'], 3)} / {fmt(f['I_L3_A'], 3)} A"),
+            ("Potencia activa / reactiva", f"{fmt(f['potencia_activa_kW'], 3)} kW / {fmt(f['potencia_reactiva_kVAr'], 3)} kVAr")], 1) + "</div>", unsafe_allow_html=True)
+        st.markdown('<div class="caja"><h4>Calculado automáticamente</h4>' + tabla_valores([
+            ("Caudal", f"{fmt(f['caudal_GPM'], 2)} GPM"), ("Altura total", f"{fmt(f['head_total_m'], 2)} m"),
+            ("NPSH disponible / requerido", f"{fmt(f['NPSHa_m'], 2)} / {fmt(f['NPSHr_m'], 2)} m"), ("Margen NPSH", f"{fmt(f['margen_NPSH_m'], 2)} m (Latacunga: {fmt(f['margen_lat_m'], 2)} m)"),
+            ("Potencia aparente / FP", f"{fmt(f['potencia_aparente_kVA'], 3)} kVA / {fmt(f['factor_potencia'], 3)}"),
+            ("Carga del motor", f"{fmt(f['carga_pct'], 0)} % ({fmt(f['I_prom_A'], 2)} A)"),
+            ("Desbalance corriente / tensión", f"{fmt(f['desb_corriente_pct'], 2)} % / {fmt(f['desb_tension_pct'], 2)} %"),
+            ("Vibración máxima", f"{fmt(f['Vib_max'], 2)} mm/s ({({0: 'normal', 1: 'alarma', 2: 'crítica'}).get(f['zona_vib'], '—')})")]) + "</div>",
+            unsafe_allow_html=True)
+        st.markdown("#### Resultados")
+        p_ia = N.predecir(modelos, lista.iloc[[int(i) - 1]]).iloc[0]
+        est_app = p_ia["estado_ia"] or "NORMAL"
+        m = f["margen_NPSH_m"]
+        if not pd.isna(m) and m <= N.REGLAS["margen_incipiente"]:
+            rod = est_app in ("DEGRADACION_RODAMIENTO", "RODAMIENTO_CRITICO", "FALLA_COMBINADA")
+            est_app = ("FALLA_COMBINADA" if rod else "CAVITACION_SEVERA") if m <= N.REGLAS["margen_severa"] else (est_app if rod else "CAVITACION_INCIPIENTE")
+        t_est = N.evaluar_modelo(modelo_activo, pd.DataFrame([f])) if modelo_activo else None
+        err = f["T_F"] - t_est if t_est is not None else None
+        rul_r, rul_p = f.get("RUL_rodamiento_h"), p_ia["RUL_ia_h"]
+        tarjetas_semaforo([
+            ("Temperatura medida (IR)", f"{fmt(f['T_F'])} °F", f.get("zona_T"), f"{fmt(f['temperatura_motor_C'])} °C"),
+            ("Temperatura del modelo", f"{fmt(t_est)} °F", None, f"error {fmt(err, 1)} °F | RMSE {fmt(modelo_activo['rmse_F'], 1)} °F", "#0D3B8C"),
+            ("Estado registrado", N.NOMBRE_ESTADO[f["estado"]], None, "recolección de datos", N.COLOR_ESTADO[f["estado"]]),
+            ("Estado estimado por la app", N.NOMBRE_ESTADO.get(est_app, est_app), None,
+             ("✔ coincide" if est_app == f["estado"] else "✘ difiere") + f" | confianza {fmt(p_ia['prob_ia'] * 100, 0)} %", N.COLOR_ESTADO.get(est_app)),
+            ("Vida remanente (RUL)", f"{fmt(min(rul_r, N.RUL_TOPE_H), 0)} h" + (" o más" if rul_r >= N.RUL_TOPE_H else ""), None,
+             f"estimada por la red: {fmt(rul_p, 0)} h", "#5B8DEF"),
+        ])
+        texto_tarjeta("Lo que el transmisor IR mediría en esta prueba frente a lo que estima el modelo matemático, y el estado del rodamiento.",
+                      f"Si la diferencia entre la medición y el modelo supera 2·RMSE ({fmt(2 * modelo_activo['rmse_F'], 1)} °F), el sensor o el rodamiento "
+                      "requieren revisión. El estado estimado usa solo variables medibles (red MLP) y el margen NPSH.",
+                      f"Modelo: {html.escape(modelo_activo['ecuacion'])}. En esta prueba la diferencia es de {fmt(err, 1)} °F.")
+        diags = N.diagnosticar(f, equipo)
+        if diags:
+            tarjetas_diagnostico(diags)
+        else:
+            st.success("Prueba sin fallas: operación normal.")
+    else:
+        st.write("Solo se piden las variables medidas en la recolección de datos. Caudal en GPM, altura, NPSH (con la presión de "
+                 "Latacunga), potencia aparente, factor de potencia, desbalances, **estado de falla y vida remanente (RUL)** se calculan solos.")
         for k, *_ in CAMPOS_REG:
-            st.session_state[f"r_{k}"] = None
-    with st.expander("¿No tienes una medición a mano? Carga un ejemplo real de la data del ingeniero"):
-        c = st.columns([2, 1])
-        est_ej = c[0].selectbox("Estado del ejemplo", [e for e in N.ESTADOS if e not in ("DETENIDA", "MANTENIMIENTO")], format_func=lambda e: N.NOMBRE_ESTADO[e])
-        if c[1].button("Cargar ejemplo", width="stretch"):
-            fila = dbase[(dbase["estado_falla"] == est_ej) & (dbase["estado_bomba"] == 1)].sample(1).iloc[0]
+            st.session_state.setdefault(f"r_{k}", None)
+        if st.session_state.pop("limpiar_reg", False):
             for k, *_ in CAMPOS_REG:
-                st.session_state[f"r_{k}"] = float(fila[k])
-            st.session_state["r_ejemplo"] = f"Ejemplo tomado del registro {fila['timestamp']} ({N.NOMBRE_ESTADO[est_ej]})"
-    if st.session_state.get("r_ejemplo"):
-        st.caption(st.session_state["r_ejemplo"])
-    u_t = st.radio("Unidad de la temperatura", ["°C", "°F"], horizontal=True)
-    nombres = [o["Nombre"] for o in equipo.get("operadores", []) if o.get("Nombre")]
-    with st.form("form_reg"):
-        c = st.columns(4)
-        fecha = c[0].date_input("Fecha", value=datetime.now().date())
-        hora = c[1].time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
-        estado_b = c[2].selectbox("Estado de la bomba", ["Operando", "Detenida"])
-        operador = c[3].selectbox("Operador", nombres or ["—"])
-        bloques = [("Proceso", CAMPOS_REG[0:5]), ("Vibración y temperatura", CAMPOS_REG[5:8]), ("Eléctricas", CAMPOS_REG[8:16])]
-        for titulo, campos in bloques:
-            st.markdown(f"**{titulo}**")
-            cols = st.columns(4)
-            for j, (k, etq, paso) in enumerate(campos):
-                cols[j % 4].number_input(etq + (f" ({u_t})" if k == "temperatura_motor_C" else ""), step=paso, key=f"r_{k}", format="%.3f" if paso < 0.01 else None)
-        obs = st.text_input("Observaciones")
-        enviar = st.form_submit_button("Guardar medición", type="primary")
-    if enviar:
-        vals = {k: st.session_state.get(f"r_{k}") for k, *_ in CAMPOS_REG}
-        if vals["temperatura_motor_C"] is not None and u_t == "°F":
-            vals["temperatura_motor_C"] = N.f_a_c(vals["temperatura_motor_C"])
-        if estado_b == "Operando" and vals["temperatura_motor_C"] is None:
-            st.error("Falta la temperatura IR: es la variable principal del proyecto.")
-        else:
-            fila = {"ID": np.nan, "timestamp": f"{fecha} {hora.strftime('%H:%M')}:00", "Origen": N.ORIGEN_NUEVO,
-                    "Operador": "" if operador == "—" else operador, "Observaciones": obs,
-                    "estado_bomba": 1 if estado_b == "Operando" else 0, **{k: (np.nan if v is None else float(v)) for k, v in vals.items()}}
-            guardado = N.guardar_registros(pd.concat([reg, pd.DataFrame([fila])], ignore_index=True))
-            nuevo = N.completar_estado(N.derivar(guardado.tail(1), equipo), modelos).iloc[0].to_dict()
-            diags = N.diagnosticar(nuevo, equipo)
-            st.session_state["res_reg"] = {"fila": {k: nuevo.get(k) for k in ("estado", "fuente_estado", "RUL_h", "T_F", "temperatura_motor_C",
-                                                                              "margen_NPSH_m", "margen_lat_m", "Vib_max", "zona_vib", "carga_pct",
-                                                                              "zona_carga", "I_prom_A", "zona_T")}, "diags": diags}
-            if alertas_cfg.get("activo") and diags and max(x["Gravedad"] for x in diags) >= int(alertas_cfg.get("nivel_min", 1)):
-                ok_, det_ = N.telegram_enviar(N.mensaje_alerta(nuevo, diags), alertas_cfg)
-                N.registrar_alerta(alertas_cfg, "Medición", "; ".join(x["Falla"] for x in diags[:3]), ok_, det_)
-                st.session_state["res_reg"]["envio"] = (ok_, det_)
-            st.session_state["limpiar_reg"] = True
-            st.session_state.pop("r_ejemplo", None)
-            st.session_state["msg"] = "Medición guardada"
-            st.rerun()
-    res = st.session_state.pop("res_reg", None)
-    if res:
-        st.markdown("**Resultado de la medición guardada**")
-        tarjetas_estado(res["fila"])
-        if res["diags"]:
-            tarjetas_diagnostico(res["diags"])
-        else:
-            st.success("Sin fallas detectadas.")
-        if res.get("envio"):
-            (st.success if res["envio"][0] else st.error)("Alerta enviada por Telegram." if res["envio"][0] else f"No se pudo enviar: {res['envio'][1]}")
+                st.session_state[f"r_{k}"] = None
+        with st.expander("¿No tienes una medición a mano? Carga un ejemplo real de los datos recolectados"):
+            c = st.columns([2, 1])
+            est_ej = c[0].selectbox("Estado del ejemplo", [e for e in N.ESTADOS if e not in ("DETENIDA", "MANTENIMIENTO")], format_func=lambda e: N.NOMBRE_ESTADO[e])
+            if c[1].button("Cargar ejemplo", width="stretch"):
+                fila = dbase[(dbase["estado_falla"] == est_ej) & (dbase["estado_bomba"] == 1)].sample(1).iloc[0]
+                for k, *_ in CAMPOS_REG:
+                    st.session_state[f"r_{k}"] = float(fila[k])
+                st.session_state["r_ejemplo"] = f"Ejemplo tomado del registro {fila['timestamp']} ({N.NOMBRE_ESTADO[est_ej]})"
+        if st.session_state.get("r_ejemplo"):
+            st.caption(st.session_state["r_ejemplo"])
+        u_t = st.radio("Unidad de la temperatura", ["°C", "°F"], horizontal=True)
+        nombres = [o["Nombre"] for o in equipo.get("operadores", []) if o.get("Nombre")]
+        with st.form("form_reg"):
+            c = st.columns(4)
+            fecha = c[0].date_input("Fecha", value=datetime.now().date())
+            hora = c[1].time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
+            estado_b = c[2].selectbox("Estado de la bomba", ["Operando", "Detenida"])
+            operador = c[3].selectbox("Operador", nombres or ["—"])
+            bloques = [("Proceso", CAMPOS_REG[0:5]), ("Vibración y temperatura", CAMPOS_REG[5:8]), ("Eléctricas", CAMPOS_REG[8:16])]
+            for titulo, campos in bloques:
+                st.markdown(f"**{titulo}**")
+                cols = st.columns(4)
+                for j, (k, etq, paso) in enumerate(campos):
+                    cols[j % 4].number_input(etq + (f" ({u_t})" if k == "temperatura_motor_C" else ""), step=paso, key=f"r_{k}", format="%.3f" if paso < 0.01 else None)
+            obs = st.text_input("Observaciones")
+            enviar = st.form_submit_button("Guardar medición", type="primary")
+        if enviar:
+            vals = {k: st.session_state.get(f"r_{k}") for k, *_ in CAMPOS_REG}
+            if vals["temperatura_motor_C"] is not None and u_t == "°F":
+                vals["temperatura_motor_C"] = N.f_a_c(vals["temperatura_motor_C"])
+            if estado_b == "Operando" and vals["temperatura_motor_C"] is None:
+                st.error("Falta la temperatura IR: es la variable principal del proyecto.")
+            else:
+                fila = {"ID": np.nan, "timestamp": f"{fecha} {hora.strftime('%H:%M')}:00", "Origen": N.ORIGEN_NUEVO,
+                        "Operador": "" if operador == "—" else operador, "Observaciones": obs,
+                        "estado_bomba": 1 if estado_b == "Operando" else 0, **{k: (np.nan if v is None else float(v)) for k, v in vals.items()}}
+                guardado = N.guardar_registros(pd.concat([reg, pd.DataFrame([fila])], ignore_index=True))
+                nuevo = N.completar_estado(N.derivar(guardado.tail(1), equipo), modelos).iloc[0].to_dict()
+                diags = N.diagnosticar(nuevo, equipo)
+                st.session_state["res_reg"] = {"fila": {k: nuevo.get(k) for k in ("estado", "fuente_estado", "RUL_h", "T_F", "temperatura_motor_C",
+                                                                                  "margen_NPSH_m", "margen_lat_m", "Vib_max", "zona_vib", "carga_pct",
+                                                                                  "zona_carga", "I_prom_A", "zona_T")}, "diags": diags}
+                if alertas_cfg.get("activo") and diags and max(x["Gravedad"] for x in diags) >= int(alertas_cfg.get("nivel_min", 1)):
+                    ok_, det_ = N.telegram_enviar(N.mensaje_alerta(nuevo, diags), alertas_cfg)
+                    N.registrar_alerta(alertas_cfg, "Medición", "; ".join(x["Falla"] for x in diags[:3]), ok_, det_)
+                    st.session_state["res_reg"]["envio"] = (ok_, det_)
+                st.session_state["limpiar_reg"] = True
+                st.session_state.pop("r_ejemplo", None)
+                st.session_state["msg"] = "Medición guardada"
+                st.rerun()
+        res = st.session_state.pop("res_reg", None)
+        if res:
+            st.markdown("**Resultado de la medición guardada**")
+            tarjetas_estado(res["fila"])
+            if res["diags"]:
+                tarjetas_diagnostico(res["diags"])
+            else:
+                st.success("Sin fallas detectadas.")
+            if res.get("envio"):
+                (st.success if res["envio"][0] else st.error)("Alerta enviada por Telegram." if res["envio"][0] else f"No se pudo enviar: {res['envio'][1]}")
 
 # =============================================================================
 # 🩺 Diagnóstico
@@ -410,7 +527,7 @@ if nav == "🩺 Diagnóstico":
 # =============================================================================
 if nav == "⚙️ Rodamientos":
     st.subheader("Análisis de vibraciones en rodamientos")
-    st.caption("Réplica automatizada de la hoja PRINCIPAL de la tabla del docente. Selecciona el rodamiento y coloca los datos del motor: el resto se calcula solo.")
+    st.caption("Selecciona el rodamiento y coloca los datos del motor: el resto se calcula solo.")
     ult_op = dbase[dbase["estado_bomba"] == 1].iloc[-1]
     c = st.columns(3)
     with c[0]:
@@ -425,7 +542,7 @@ if nav == "⚙️ Rodamientos":
         direc = cc[1].selectbox("Dirección", ["Horizontal", "Vertical", "Axial"])
         st.selectbox("Modo IRD", ["mm/s RMS", "g Aceleración", "Hz"])
         vib = st.number_input("Vibración (mm/s RMS)", value=round(float(ult_op["vibracion_descarga_mm_s"]), 2), step=0.01,
-                              help="Por defecto, la última vibración de descarga de la data del ingeniero")
+                              help="Por defecto, la última vibración en descarga de los datos recolectados")
         acel = st.number_input("Aceleración (g)", value=None, step=0.001, format="%.3f")
         pico = st.number_input("Pico medido (Hz)", value=None, step=0.1)
         fecha_m = st.date_input("Fecha de medición", value=datetime.now().date())
@@ -491,19 +608,19 @@ Desviación mínima: <b>{fmt(a['dev_min'] * 100 if a['dev_min'] is not None else
         h["Serie"] = h["Rodamiento"] + " " + h["Punto"] + " " + h["Dirección"]
         st.altair_chart(alt.Chart(h).mark_line(point=True).encode(x=alt.X("Fecha:T"), y=alt.Y("mm/s:Q"), color=alt.Color("Serie:N", scale=alt.Scale(range=PALETA)),
                                                                   tooltip=list(h.columns)).properties(height=240), width="stretch")
-    with st.expander("Correcciones respecto a las hojas ORIGINAL_6203 y ORIGINAL_6202 del Excel"):
-        st.markdown("- **FTF:** la hoja usaba `COS(ángulo)` sin convertir a radianes; aquí se usa `COS(RADIANES(ángulo))`.\n"
-                    "- **BSF y BPFI:** las celdas de factor estaban intercambiadas; aquí cada frecuencia usa su fórmula.\n"
-                    "- **4× RPM (hoja 6202):** apuntaba a una celda vacía; aquí se calcula como 4·fr.\n"
-                    "- La hoja **PRINCIPAL** estaba correcta y es la que se replica. Sus valores por defecto (2 polos con 1720 rpm) no eran "
-                    "coherentes: 1720 rpm corresponde a 4 polos. Aquí se usan los datos del motor real (2 polos, 3450 rpm).")
+    with st.expander("Notas sobre las fórmulas utilizadas"):
+        st.markdown("- **FTF** = ½·fr·(1 − d/D·cos α), con el ángulo convertido a radianes.\n"
+                    "- **BPFO** = n/2·fr·(1 − d/D·cos α);  **BPFI** = n/2·fr·(1 + d/D·cos α).\n"
+                    "- **BSF** = D/(2d)·fr·(1 − (d/D·cos α)²).\n"
+                    "- Las fórmulas se verificaron frente a la hoja de cálculo de referencia; se corrigieron el uso de radianes en FTF, "
+                    "el intercambio entre BSF y BPFI y la referencia del 4×. Valores por defecto del motor real: 2 polos, 3450 rpm.")
 
 # =============================================================================
 # 💧 Cavitación
 # =============================================================================
 if nav == "💧 Cavitación":
     st.subheader("Diagnóstico automático de cavitación – bomba centrífuga")
-    st.caption("Réplica automatizada de la hoja CAVITACION del docente (Sánchez, Carvajal, Poalacin y Salazar).")
+    st.caption("Método basado en la frecuencia de paso de álabes (BPF) y la vibración global (Sánchez, Carvajal, Poalacin y Salazar).")
     ult_op = dbase[dbase["estado_bomba"] == 1].iloc[-1]
     c = st.columns(3)
     with c[0]:
@@ -520,7 +637,7 @@ if nav == "💧 Cavitación":
     with c[1]:
         st.markdown('<div class="caja"><h4>3. Mediciones del IRD</h4>', unsafe_allow_html=True)
         vg = st.number_input("Vibración global medida (mm/s RMS)", value=round(float(ult_op["vibracion_succion_mm_s"]), 2), step=0.01,
-                             help="Por defecto, la última vibración en succión de la data del ingeniero")
+                             help="Por defecto, la última vibración en succión de los datos recolectados")
         an = st.number_input("Amplitud en BPF – condición NORMAL (mm/s)", value=0.02, step=0.001, format="%.3f")
         aa = st.number_input("Amplitud en BPF – medición ACTUAL (mm/s)", value=0.004, step=0.001, format="%.3f")
         pk = st.number_input("Frecuencia del pico observado (Hz, opcional)", value=None, step=1.0)
@@ -540,7 +657,7 @@ Aumento en BPF: <b>{cav['aumento_txt']}</b><br>Coincidencia del pico: <b>{cav['c
 <div class="chip" style="background:{col};font-size:1rem">{cav['diagnostico']}</div></div>""", unsafe_allow_html=True)
     st.caption("Los datos de placa permiten calcular la frecuencia de referencia (BPF), pero no confirman por sí solos que exista cavitación: "
                "se necesita al menos una medición real de vibración. El umbral del 25 % es un criterio didáctico interno.")
-    st.subheader("Margen NPSH: data del ingeniero vs presión real de Latacunga")
+    st.subheader("Margen NPSH: datos recolectados (nivel del mar) vs presión real de Latacunga")
     patm = N.p_atm_kpa(equipo)
     op_b = dbase[dbase["estado_bomba"] == 1].copy()
     op_b["Estado en Latacunga"] = [N.NOMBRE_ESTADO[N.estado_por_reglas(m, h, True)] for m, h in zip(op_b["margen_lat_m"], op_b["health_index_rodamiento"])]
@@ -556,18 +673,18 @@ Aumento en BPF: <b>{cav['aumento_txt']}</b><br>Coincidencia del pico: <b>{cav['c
             + ch.encode(y="NPSHa_lat_m:Q", color=alt.value("#F28C28"))
             + alt.Chart(N.CURVA[N.CURVA["Q_gpm"].between(20, 40)]).mark_line(color="#D64545", strokeWidth=3).encode(x="Q_gpm:Q", y="NPSHr_m:Q"))
     st.altair_chart(capa.properties(height=320), width="stretch")
-    texto_tarjeta("NPSH disponible de la data del ingeniero (azul, nivel del mar) y el mismo cálculo con la presión de Latacunga (naranja), "
+    texto_tarjeta("NPSH disponible de los datos recolectados (azul, nivel del mar) y el mismo cálculo con la presión de Latacunga (naranja), "
                   "frente al NPSH requerido del fabricante (rojo).",
                   "Mientras los puntos estén sobre la línea roja con margen, no hay cavitación. La altitud baja todos los puntos casi 3 m.",
                   f"Con la presión de Latacunga, {cambian} horas de operación cambiarían de estado. Las mediciones nuevas de esta app ya "
-                  "usan la presión local; la data del ingeniero se conserva como viene para respetar sus etiquetas.")
+                  "usan la presión local; los datos recolectados se conservan como vienen para respetar sus estados registrados.")
 
 # =============================================================================
 # 🧠 Estado y RUL
 # =============================================================================
 if nav == "🧠 Estado y RUL":
     st.subheader("Estado de falla y vida remanente (RUL) del rodamiento")
-    st.markdown("**Reglas del estado de falla** (reconstruidas por el docente con un árbol de decisión; concordancia del 100 % con la data)")
+    st.markdown("**Reglas del estado de falla** (obtenidas con un árbol de decisión; concordancia del 100 % con los estados registrados)")
     st.dataframe(pd.DataFrame([
         ("Bomba detenida", "Detenida (o Mantenimiento tras el cambio de rodamiento)"),
         (f"Margen NPSH ≤ {N.REGLAS['margen_severa']} m e índice de salud ≤ {N.REGLAS['hi_degradacion']}", "Falla combinada"),
@@ -579,7 +696,7 @@ if nav == "🧠 Estado y RUL":
     st.caption("El margen NPSH y el índice de salud no se miden directamente en planta. Por eso, para los registros nuevos el estado lo "
                "predice una red neuronal MLP con 19 variables medibles, y la cavitación se confirma con el margen NPSH calculado en Latacunga.")
     tl = muestra(dbase.sort_values("timestamp"), 1500).assign(Fecha=lambda x: pd.to_datetime(x["timestamp"]))
-    st.markdown("**Línea de tiempo de la data del ingeniero**")
+    st.markdown("**Línea de tiempo de los datos recolectados**")
     st.altair_chart(alt.Chart(tl).mark_tick(thickness=2).encode(x=alt.X("Fecha:T", title=None), y=alt.Y("estado_txt:N", sort=DOM_EST, title=None),
                                                                 color=alt.Color("estado_txt:N", scale=ESCALA_EST, legend=None)).properties(height=230), width="stretch")
     hi = dbase[dbase["estado_bomba"] == 1][["horas_trabajo_acum_h", "health_index_rodamiento", "RUL_rodamiento_h"]]
@@ -603,12 +720,12 @@ if nav == "🧠 Estado y RUL":
     bm = alt.Chart(cml).encode(x=alt.X("Predicho:N", sort=None), y=alt.Y("Real:N", sort=None))
     c[1].altair_chart((bm.mark_rect().encode(color=alt.Color("n:Q", scale=alt.Scale(scheme="blues"), legend=None))
                        + bm.mark_text().encode(text="n:Q")).properties(height=280), width="stretch")
-    st.markdown("**Comparación con el cuaderno Colab del docente**")
+    st.markdown("**Comparación con los modelos de referencia (TensorFlow)**")
     st.dataframe(pd.DataFrame([
         ("MLP (Colab, TensorFlow)", 0.966, 15.4, 0.962), ("LSTM (Colab, TensorFlow)", 0.646, 6.9, 0.993),
         ("MLP (esta aplicación, scikit-learn)", round(modelos["f1"], 3), round(modelos["mae"], 1), round(modelos["r2"], 3))],
         columns=["Modelo", "F1 macro (estado)", "MAE RUL (h)", "R² RUL"]), hide_index=True, width="stretch")
-    with st.expander("Lectura crítica de las métricas (del cuaderno del docente)"):
+    with st.expander("Lectura crítica de las métricas"):
         st.markdown("- **Un solo ciclo de falla:** la data tiene una única degradación hasta la falla; las métricas de RUL son optimistas.\n"
                     "- **RUL sintético determinista:** RUL = 2725 − horas; por eso no se usan las horas como entrada.\n"
                     "- **Clases pequeñas:** cavitación incipiente (24 h), falla combinada (8 h) y mantenimiento (12 h) dan métricas inestables.\n"
@@ -633,7 +750,7 @@ if nav == "🛠️ Mantenimiento":
             st.warning(f"Programar el cambio de rodamiento ({equipo['rod_DE']} lado bomba / {equipo['rod_NDE']} lado ventilador) en los próximos {fmt(dias, 0)} días.")
         ev = dbase[dbase["evento_mantenimiento"].notna()][["timestamp", "horas_trabajo_acum_h", "evento_mantenimiento"]]
         if len(ev):
-            st.caption("Eventos de la data del ingeniero: " + "; ".join(f"{r.timestamp} – {r.evento_mantenimiento} a las {r.horas_trabajo_acum_h:.0f} h" for r in ev.itertuples()))
+            st.caption("Eventos registrados: " + "; ".join(f"{r.timestamp} – {r.evento_mantenimiento} a las {r.horas_trabajo_acum_h:.0f} h" for r in ev.itertuples()))
     c = st.columns(3)
     c[0].metric("Horómetro registrado", f"{fmt(float(mant.get('horometro_h') or 0), 0)} h")
     c[1].metric("Tareas vencidas", int((mant_estado["nivel"] == 2).sum()))
@@ -692,7 +809,7 @@ if nav == "📊 Gráficas":
             st.altair_chart(alt.Chart(m).mark_circle(size=20).encode(x=alt.X("Fecha:T", title=None), y=alt.Y("margen_NPSH_m:Q", title="Margen NPSH (m)"),
                                                                      color=alt.Color("estado_txt:N", scale=ESCALA_EST, title="Estado")).properties(height=260)
                             + alt.Chart(pd.DataFrame({"y": [N.REGLAS["margen_incipiente"], N.REGLAS["margen_severa"]]})).mark_rule(strokeDash=[6, 4], color="#D64545").encode(y="y:Q"), width="stretch")
-            texto_tarjeta("Margen NPSH (NPSHa − NPSHr) en el tiempo, con los umbrales del docente (0,82 m incipiente; 0,107 m severa).",
+            texto_tarjeta("Margen NPSH (NPSHa − NPSHr) en el tiempo, con los umbrales de estado (0,82 m incipiente; 0,107 m severa).",
                           "Las caídas bruscas son los episodios de cavitación inducidos por nivel bajo o restricción en la succión.",
                           f"{int((dop['margen_NPSH_m'] <= N.REGLAS['margen_incipiente']).sum())} horas bajo 0,82 m.")
         if sec == "🌡️ Térmico":
@@ -716,11 +833,11 @@ if nav == "📊 Gráficas":
         if sec == "📳 Vibraciones":
             lv = m.melt(id_vars=["Fecha", "estado_txt"], value_vars=["vibracion_succion_mm_s", "vibracion_descarga_mm_s"], var_name="Punto", value_name="mm/s")
             lv["Punto"] = lv["Punto"].map({"vibracion_succion_mm_s": "Succión", "vibracion_descarga_mm_s": "Descarga"})
-            zonas = pd.DataFrame({"y0": [0, equipo["iso_A"], equipo["iso_B"], equipo["iso_C"]], "y1": [equipo["iso_A"], equipo["iso_B"], equipo["iso_C"], max(8, lv["mm/s"].max())], "Zona": list("ABCD")})
-            st.altair_chart((alt.Chart(zonas).mark_rect(opacity=.13).encode(y="y0:Q", y2="y1:Q", color=alt.Color("Zona:N", scale=alt.Scale(range=["#2E9E5B", "#7BC67E", "#F2B705", "#D64545"])))
+            zonas = pd.DataFrame({"y0": [0, equipo["iso_A"], equipo["iso_B"], equipo["iso_C"]], "y1": [equipo["iso_A"], equipo["iso_B"], equipo["iso_C"], max(8, lv["mm/s"].max())], "Zona": ["Normal", "Atención", "Alarma", "Crítico"]})
+            st.altair_chart((alt.Chart(zonas).mark_rect(opacity=.13).encode(y="y0:Q", y2="y1:Q", color=alt.Color("Zona:N", scale=alt.Scale(domain=["Normal", "Atención", "Alarma", "Crítico"], range=["#2E9E5B", "#F2B705", "#F28C28", "#D64545"])))
                              + alt.Chart(lv).mark_circle(size=12).encode(x=alt.X("Fecha:T", title=None), y=alt.Y("mm/s:Q"), shape="Punto:N", color=alt.value("#0A1F44"))).properties(height=320), width="stretch")
-            texto_tarjeta("Vibración global en succión y descarga sobre las zonas ISO 10816 clase I.", "Zona C: investigar; zona D: riesgo de daño.",
-                          f"{int((dop['zona_vib'] >= 1).sum())} horas en zona C o D. Para el espectro y las frecuencias de falla usa «⚙️ Rodamientos» y «💧 Cavitación».")
+            texto_tarjeta("Vibración global en succión y descarga sobre las zonas de severidad (1,4 / 2,8 / 4,5 mm/s).", "Verde: normal; amarillo: atención; naranja: alarma; rojo: crítico.",
+                          f"{int((dop['zona_vib'] >= 1).sum())} horas sobre el límite de alarma. Para el espectro y las frecuencias de falla usa «⚙️ Rodamientos» y «💧 Cavitación».")
         if sec == "⚡ Eléctrico":
             st.altair_chart(alt.Chart(m).mark_circle(size=14).encode(x=alt.X("Fecha:T", title=None), y=alt.Y("carga_pct:Q", title="Carga (% I nominal)", scale=alt.Scale(zero=False)),
                                                                      color=alt.Color("estado_txt:N", scale=ESCALA_EST, title="Estado")).properties(height=260), width="stretch")
@@ -821,14 +938,14 @@ if nav == "🔍 Modelo":
 # 🎯 Estimador
 # =============================================================================
 if nav == "🎯 Estimador":
-    if not modelo_temp:
+    if not modelo_activo:
         st.info("Primero guarda un modelo en «🔍 Modelo».")
     else:
         st.subheader("Estimación de la temperatura del escudo")
-        st.code(modelo_temp["ecuacion"], language=None)
-        st.caption(f"{modelo_temp['nombre']} | R² = {fmt(modelo_temp['r2'], 3)} | RMSE = {fmt(modelo_temp['rmse_F'], 2)} °F | {modelo_temp['fecha']}")
+        st.code(modelo_activo["ecuacion"], language=None)
+        st.caption(f"{modelo_activo['nombre']} | R² = {fmt(modelo_activo['r2'], 3)} | RMSE = {fmt(modelo_activo['rmse_F'], 2)} °F | {modelo_activo['fecha']}")
         nec = []
-        for v in modelo_temp["variables"]:
+        for v in modelo_activo["variables"]:
             for x in N.DEPENDE.get(v, [v]):
                 if x not in nec:
                     nec.append(x)
@@ -839,20 +956,20 @@ if nav == "🎯 Estimador":
         for i, v in enumerate(nec):
             ent[v] = cols[i % 3].number_input(N.ETIQUETAS.get(v, v), value=float(ult[v]), key=f"e_{v}")
         f = N.derivar(N.normalizar(pd.DataFrame([ent])), equipo)
-        t = N.evaluar_modelo(modelo_temp, f)
+        t = N.evaluar_modelo(modelo_activo, f)
         z = 0 if N.f_a_c(t) < equipo["alarma_C"] else 1 if N.f_a_c(t) < equipo["disparo_C"] else 2
         tarjetas_semaforo([("Temperatura estimada", f"{fmt(t)} °F", z, f"{fmt(N.f_a_c(t))} °C")])
         t_ir = st.number_input("Lectura del transmisor IR (°F), opcional", value=None, step=0.1)
         if t_ir is not None:
             dif = t_ir - t
-            (st.warning if abs(dif) > 2 * modelo_temp["rmse_F"] else st.success)(
-                f"Diferencia {dif:+.1f} °F. " + ("Revisa el sensor (emisividad, alineación) o el rodamiento." if abs(dif) > 2 * modelo_temp["rmse_F"] else "Medición coherente con el modelo."))
+            (st.warning if abs(dif) > 2 * modelo_activo["rmse_F"] else st.success)(
+                f"Diferencia {dif:+.1f} °F. " + ("Revisa el sensor (emisividad, alineación) o el rodamiento." if abs(dif) > 2 * modelo_activo["rmse_F"] else "Medición coherente con el modelo."))
 
 # =============================================================================
 # 🌡️ Transmisor IR
 # =============================================================================
 if nav == "🌡️ Transmisor IR":
-    st.subheader("1. Criterios de selección (informe técnico del docente)")
+    st.subheader("1. Criterios de selección")
     with st.form("form_ir"):
         c = st.columns(4)
         e = {}
@@ -871,8 +988,8 @@ if nav == "🌡️ Transmisor IR":
             st.rerun()
     r = req_ir
     st.dataframe(pd.DataFrame([
-        ("Rango", f"{fmt(r['rango_min_C'], 0)} a {fmt(r['rango_max_C'], 0)} °C", f"Máximo medido {fmt(r['t_max_obs_C'])} °C; el docente pide ~0–150 °C"),
-        ("Relación D:S", f"≥ {fmt(r['ds_req'])} : 1", f"Criterio del docente (15:1 a 22:1) y geometría: punto ≤ {fmt(r['spot_max_mm'])} mm a {fmt(r['distancia_mm'], 0)} mm"),
+        ("Rango", f"{fmt(r['rango_min_C'], 0)} a {fmt(r['rango_max_C'], 0)} °C", f"Máximo medido {fmt(r['t_max_obs_C'])} °C; rango de diseño ~0–150 °C"),
+        ("Relación D:S", f"≥ {fmt(r['ds_req'])} : 1", f"Criterio de diseño (15:1 a 22:1) y geometría: punto ≤ {fmt(r['spot_max_mm'])} mm a {fmt(r['distancia_mm'], 0)} mm"),
         ("Cabezal", f"≥ {fmt(r['cabezal_C'], 0)} °C", "Temperatura ambiente junto al motor ODP"), ("Respuesta", f"≤ {fmt(r['resp_ms'], 0)} ms", "Más que suficiente para la degradación térmica"),
         ("Exactitud", f"±{fmt(r['exactitud_C'])} °C", "Menor que la separación entre estados normal y de degradación"),
         ("Salida", r["salida"], "4–20 mA con SM 1231 / SB 1231, o 0–10 V a la entrada integrada"), ("Emisividad", "Ajustable o fija 0,95", "Con cinta negra mate en el punto"),
@@ -885,7 +1002,7 @@ if nav == "🌡️ Transmisor IR":
         el = next(c for c in catalogo if c["Modelo"] == ok.iloc[0]["Modelo"])
         st.markdown(f"""<div class="recomendado"><div class="k">Transmisor recomendado</div><h2>{html.escape(el['Marca'])} {html.escape(el['Modelo'])}</h2>
 <span class="badge">Puntaje {fmt(ok.iloc[0]['Puntaje'], 0)}</span><span class="badge">D:S {fmt(el['DS'], 0)}:1</span><span class="badge">Cabezal {el['Tcab_C']} °C</span>
-<p style="margin:.7rem 0 0;color:#E3EEFF">Cumple todos los criterios del docente; mide un punto de {fmt(ok.iloc[0]['Punto medido (mm)'])} mm a {fmt(r['distancia_mm'], 0)} mm.
+<p style="margin:.7rem 0 0;color:#E3EEFF">Cumple todos los criterios de selección; mide un punto de {fmt(ok.iloc[0]['Punto medido (mm)'])} mm a {fmt(r['distancia_mm'], 0)} mm.
 Se recomiendan dos unidades (rodamientos DE y NDE) y un PT100 de contacto como referencia de calibración.</p></div>""", unsafe_allow_html=True)
         ca, cb = st.columns([3, 2])
         ca.markdown(ficha_datasheet(el), unsafe_allow_html=True)
@@ -916,11 +1033,11 @@ Se recomiendan dos unidades (rodamientos DE y NDE) y un PT100 de contacto como r
             st.rerun()
 
 # =============================================================================
-# ▶️ Simulación en vivo (reproduce la data del ingeniero hora por hora)
+# ▶️ Simulación en vivo (reproduce los datos recolectados hora por hora)
 # =============================================================================
 if nav == "▶️ Simulación":
     st.subheader("Monitoreo simulado en tiempo real")
-    st.write("Reproduce la data del ingeniero hora por hora, como si llegara del PLC: actualiza el estado, la temperatura y el diagnóstico, "
+    st.write("Reproduce los datos recolectados hora por hora, como si llegara del PLC: actualiza el estado, la temperatura y el diagnóstico, "
              "y puede enviar alertas a Telegram cuando aparece una falla.")
     eventos = dbase[(dbase["nivel"] > 0)]
     inicios = dbase[(dbase["nivel"] > 0) & (dbase["nivel"].shift() == 0)]
@@ -967,8 +1084,8 @@ if nav == "▶️ Simulación":
 # 📋 Datos
 # =============================================================================
 if nav == "📋 Datos":
-    vista = st.radio("Ver", ["Data del ingeniero (solo lectura)", "Registros nuevos (editable)"], horizontal=True)
-    if vista.startswith("Data"):
+    vista = st.radio("Ver", ["Datos recolectados (solo lectura)", "Registros nuevos (editable)"], horizontal=True)
+    if vista.startswith("Datos recolectados"):
         cols = ["timestamp", "estado_txt", "horas_trabajo_acum_h", "caudal_GPM", "presion_succion_PSI", "presion_descarga_PSI", "margen_NPSH_m",
                 "margen_lat_m", "vibracion_succion_mm_s", "vibracion_descarga_mm_s", "temperatura_motor_C", "T_F", "I_prom_A", "potencia_activa_kW",
                 "factor_potencia", "health_index_rodamiento", "RUL_rodamiento_h", "evento_mantenimiento"]
@@ -989,7 +1106,7 @@ if nav == "📋 Datos":
         if len(dreg):
             st.markdown("**Resultado calculado de los registros nuevos**")
             st.dataframe(dreg[["ID", "timestamp", "estado_txt", "fuente_estado", "RUL_h", "T_F", "margen_NPSH_m", "Vib_max", "carga_pct"]].round(2), hide_index=True, width="stretch")
-        sub = st.file_uploader("Cargar mediciones desde CSV o Excel (mismos nombres de columna que la data del ingeniero)", type=["csv", "xlsx"])
+        sub = st.file_uploader("Cargar mediciones desde CSV o Excel (mismos nombres de columna que los datos recolectados)", type=["csv", "xlsx"])
         if sub is not None and st.button("Importar archivo"):
             nuevo = pd.read_csv(sub) if sub.name.lower().endswith(".csv") else pd.read_excel(sub)
             nuevo["ID"] = np.nan
@@ -1067,8 +1184,8 @@ if nav == "⚙️ Configuración":
         c = st.columns(4)
         e["rod_DE"] = c[0].selectbox("Rodamiento DE", list(N.BD_RODAMIENTOS), index=list(N.BD_RODAMIENTOS).index(e["rod_DE"]))
         e["rod_NDE"] = c[1].selectbox("Rodamiento NDE", list(N.BD_RODAMIENTOS), index=list(N.BD_RODAMIENTOS).index(e["rod_NDE"]))
-        e["iso_B"] = c[2].number_input("ISO zona B ≤ (mm/s)", value=float(e["iso_B"]))
-        e["iso_C"] = c[3].number_input("ISO zona C ≤ (mm/s)", value=float(e["iso_C"]))
+        e["iso_B"] = c[2].number_input("Vibración: alarma sobre (mm/s)", value=float(e["iso_B"]))
+        e["iso_C"] = c[3].number_input("Vibración: crítico sobre (mm/s)", value=float(e["iso_C"]))
         if st.form_submit_button("Guardar", type="primary"):
             N.guardar_json(N.ARCH_EQUIPO, e)
             st.session_state["msg"] = "Configuración guardada"
@@ -1157,7 +1274,7 @@ def generar_informe() -> bytes:
     p.add_run("Operadores: " + (", ".join(o["Nombre"] for o in equipo.get("operadores", []) if o.get("Nombre")) or "—") + "\n")
     p.add_run(f"Fecha: {datetime.now():%Y-%m-%d %H:%M}")
     tit("1. Datos analizados")
-    doc.add_paragraph(f"Data sintética Goulds 3642 del docente: {len(dbase)} registros horarios, {int((dbase['estado_bomba'] == 1).sum())} h en operación. "
+    doc.add_paragraph(f"Datos recolectados de la bomba Goulds 3642: {len(dbase)} registros horarios, {int((dbase['estado_bomba'] == 1).sum())} h en operación. "
                       f"Registros nuevos: {len(dreg)}.")
     cnt = dbase["estado_txt"].value_counts()
     tabla([(k, v, f"{v / len(dbase) * 100:.1f} %") for k, v in cnt.items()], ["Estado", "Horas", "%"])
@@ -1168,10 +1285,10 @@ def generar_informe() -> bytes:
         doc.add_paragraph(f"Figura {i}. {txt}").runs[0].italic = True
     tit("3. Modelos")
     tabla([("MLP estado (esta app)", f"F1 macro {modelos['f1']:.3f}"), ("MLP RUL (esta app)", f"MAE {modelos['mae']:.1f} h; R² {modelos['r2']:.3f}"),
-           ("MLP / LSTM (Colab del docente)", "F1 0,966 / 0,646; RUL R² 0,962 / 0,993")], ["Modelo", "Resultado"])
-    if modelo_temp:
-        doc.add_paragraph("Modelo de temperatura del escudo: ").add_run(modelo_temp["ecuacion"]).bold = True
-        doc.add_paragraph(f"R² = {modelo_temp['r2']:.3f}; RMSE = {modelo_temp['rmse_F']:.2f} °F.")
+           ("MLP / LSTM de referencia (TensorFlow)", "F1 0,966 / 0,646; RUL R² 0,962 / 0,993")], ["Modelo", "Resultado"])
+    if modelo_activo:
+        doc.add_paragraph("Modelo de temperatura del escudo: ").add_run(modelo_activo["ecuacion"]).bold = True
+        doc.add_paragraph(f"R² = {modelo_activo['r2']:.3f}; RMSE = {modelo_activo['rmse_F']:.2f} °F.")
     tit("4. Selección del transmisor IR")
     tabla([(x["Modelo"], "Sí" if x["Cumple todo"] else "No", x["Punto medido (mm)"], x["Puntaje"], x["No cumple"]) for x in tabla_ir.to_dict("records")],
           ["Modelo", "Cumple", "Punto (mm)", "Puntaje", "No cumple"])
