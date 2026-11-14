@@ -93,6 +93,9 @@ h3 { border-left:5px solid var(--electrico); padding-left:.6rem !important; }
 .paso .big { font-size:1.3rem; font-weight:800; color:var(--marino); margin:.5rem 0 .2rem; }
 .paso p { margin:.2rem 0 0; color:#3B4A66; font-size:.9rem; }
 .paso.fin { border-top-color:var(--rayo); background:linear-gradient(160deg,#fff 60%,#FFF7DD); }
+.intro { background:#fff; border:1px solid #D5E2F5; border-left:6px solid var(--rayo); border-radius:12px; padding:.75rem 1rem; margin:.2rem 0 1rem; display:grid; gap:.4rem; color:#24324d; font-size:.95rem; }
+.intro .etq { display:block; font-size:.74rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--electrico); }
+.paso p.eq { font-family:monospace; font-size:.8rem; background:#F4F7FC; border-radius:6px; padding:.35rem .5rem; }
 .chip { display:inline-block; padding:.2rem .7rem; border-radius:20px; color:#fff; font-weight:700; font-size:.85rem; }
 .caja { background:#fff; border:1px solid #D5E2F5; border-radius:12px; padding:.8rem 1rem; margin:.3rem 0 .8rem; }
 .caja h4 { margin:0 0 .4rem; color:var(--marino); font-size:1rem; }

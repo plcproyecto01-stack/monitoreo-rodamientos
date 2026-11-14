@@ -68,18 +68,69 @@ ETIQUETAS = {
     "nivel_tanque_mm": "Nivel del tanque (mm)", "caudal_L_h": "Caudal (L/h)", "caudal_GPM": "Caudal (GPM)",
     "presion_succion_PSI": "Presión de succión (psi)", "presion_descarga_PSI": "Presión de descarga (psi)",
     "head_total_m": "Altura total (m)", "NPSHa_m": "NPSH disponible (m)", "NPSHr_m": "NPSH requerido (m)",
-    "margen_NPSH_m": "Margen NPSH (m)", "margen_mar_m": "Margen NPSH a nivel del mar (m)",
-    "margen_lat_m": "Margen NPSH en Latacunga (m)", "vibracion_succion_mm_s": "Vibración en succión (mm/s RMS)",
-    "vibracion_descarga_mm_s": "Vibración en descarga (mm/s RMS)", "temperatura_motor_C": "Temperatura IR del escudo (°C)",
-    "T_F": "Temperatura IR del escudo (°F)", "V_L1L2_V": "Voltaje L1-L2 (V)", "V_L2L3_V": "Voltaje L2-L3 (V)",
+    "margen_NPSH_m": "Margen contra cavitación, NPSH (m)", "margen_mar_m": "Margen contra cavitación a nivel del mar (m)",
+    "margen_lat_m": "Margen contra cavitación en Latacunga (m)", "vibracion_succion_mm_s": "Vibración en succión (mm/s RMS)",
+    "vibracion_descarga_mm_s": "Vibración en descarga (mm/s RMS)", "temperatura_motor_C": "Temperatura del rodamiento, sensor IR (°C)",
+    "T_F": "Temperatura del rodamiento, sensor IR (°F)", "V_L1L2_V": "Voltaje L1-L2 (V)", "V_L2L3_V": "Voltaje L2-L3 (V)",
     "V_L3L1_V": "Voltaje L3-L1 (V)", "I_L1_A": "Corriente L1 (A)", "I_L2_A": "Corriente L2 (A)", "I_L3_A": "Corriente L3 (A)",
     "potencia_activa_kW": "Potencia activa (kW)", "potencia_reactiva_kVAr": "Potencia reactiva (kVAr)",
     "potencia_aparente_kVA": "Potencia aparente (kVA)", "factor_potencia": "Factor de potencia",
     "I_prom_A": "Corriente promedio (A)", "carga_pct": "Carga del motor (% de I nominal)",
     "desb_corriente_pct": "Desbalance de corriente (%)", "desb_tension_pct": "Desbalance de tensión (%)",
     "Vib_max": "Vibración máxima (mm/s)", "health_index_rodamiento": "Índice de salud del rodamiento (0–1)",
-    "RUL_h": "Vida remanente del rodamiento (h)", "eta_global_pct": "Eficiencia global (%)", "E_H_pct": "Error de altura vs curva (%)",
+    "RUL_h": "Vida útil restante del rodamiento (h)", "timestamp": "Fecha y hora", "estado_txt": "Estado",
+    "RUL_rodamiento_h": "Vida útil restante registrada (h)", "evento_mantenimiento": "Evento", "eta_global_pct": "Eficiencia global (%)", "E_H_pct": "Error de altura vs curva (%)",
 }
+NOMBRE_CORTO = {
+    "vibracion_descarga_mm_s": "VibDesc", "vibracion_succion_mm_s": "VibSucc", "Vib_max": "VibMax", "eta_global_pct": "Efic",
+    "nivel_tanque_mm": "Nivel", "caudal_GPM": "Caudal", "caudal_L_h": "Caudal", "presion_succion_PSI": "Psucc",
+    "presion_descarga_PSI": "Pdesc", "head_total_m": "Altura", "I_prom_A": "Corriente", "carga_pct": "Carga",
+    "potencia_activa_kW": "Pact", "potencia_reactiva_kVAr": "Preact", "factor_potencia": "FP",
+    "desb_corriente_pct": "DesbI", "desb_tension_pct": "DesbV", "horas_trabajo_acum_h": "Horas", "margen_NPSH_m": "MargenNPSH",
+}
+UNIDAD = {
+    "vibracion_descarga_mm_s": "mm/s", "vibracion_succion_mm_s": "mm/s", "Vib_max": "mm/s", "eta_global_pct": "%",
+    "nivel_tanque_mm": "mm", "caudal_GPM": "GPM", "caudal_L_h": "L/h", "presion_succion_PSI": "psi", "presion_descarga_PSI": "psi",
+    "head_total_m": "m", "I_prom_A": "A", "carga_pct": "%", "potencia_activa_kW": "kW", "potencia_reactiva_kVAr": "kVAr",
+    "factor_potencia": "", "desb_corriente_pct": "%", "desb_tension_pct": "%", "horas_trabajo_acum_h": "h", "margen_NPSH_m": "m",
+}
+
+
+def _corto(t: str) -> str:
+    if t.endswith("^2"):
+        return NOMBRE_CORTO.get(t[:-2], t[:-2]) + "²"
+    return NOMBRE_CORTO.get(t, t)
+
+
+def ecuaciones(modelo: dict) -> tuple[str, str]:
+    """Misma ecuación en °F y en °C (T°C = (T°F − 32)/1,8)."""
+    b0, cs, ts = modelo["intercepto"], modelo["coeficientes"], modelo["terminos"]
+
+    def txt(y, a0, coefs):
+        s_ = f"{y} = {a0:.2f}".replace(".", ",")
+        for b, t in zip(coefs, ts):
+            s_ += f" {'+' if b >= 0 else '−'} {abs(b):.4g}·{_corto(t)}".replace(".", ",")
+        return s_
+    return txt("T(°F)", b0, cs), txt("T(°C)", (b0 - 32) / 1.8, [c / 1.8 for c in cs])
+
+
+def leyenda_ecuacion(modelo: dict) -> str:
+    return " · ".join(f"{_corto(t)} = {ETIQUETAS.get(t.rstrip('^2'), t)}" for t in modelo["variables"])
+
+
+def lectura_ecuacion(modelo: dict, unidad: str = "°F") -> str:
+    """Explicación en palabras de la ecuación."""
+    k = 1 if unidad == "°F" else 1 / 1.8
+    b0 = modelo["intercepto"] if unidad == "°F" else (modelo["intercepto"] - 32) / 1.8
+    partes = [f"la temperatura parte de {b0:.1f} {unidad}".replace(".", ",")]
+    for b, t in zip(modelo["coeficientes"], modelo["terminos"]):
+        if t.endswith("^2"):
+            continue
+        u = UNIDAD.get(t, "")
+        partes.append(f"{'sube' if b > 0 else 'baja'} {abs(b) * k:.3g} {unidad} por cada {u or 'unidad'} de {ETIQUETAS.get(t, t).split(' (')[0].lower()}".replace(".", ","))
+    return "Según el modelo, " + ", ".join(partes[:1]) + ("; " + "; ".join(partes[1:]) if len(partes) > 1 else "") + "."
+
+
 # Entradas del MLP (19 variables medibles)
 FEATURES = ["caudal_GPM", "presion_succion_PSI", "presion_descarga_PSI", "head_total_m", "nivel_tanque_mm",
             "vibracion_succion_mm_s", "vibracion_descarga_mm_s", "temperatura_motor_C",
@@ -580,15 +631,15 @@ def diagnosticar(f: dict, eq: dict) -> list[dict]:
     t = num("temperatura_motor_C")
     if t is not None and t >= eq["alarma_C"]:
         crit = t >= eq["disparo_C"]
-        out.append({"Falla": "Temperatura del escudo sobre el límite", "Gravedad": 2 if crit else 1,
+        out.append({"Falla": "Temperatura del rodamiento sobre el límite", "Gravedad": 2 if crit else 1,
                     "Evidencia": f"{t:.1f} °C ({c_a_f(t):.1f} °F); alarma {eq['alarma_C']:.0f} °C, disparo {eq['disparo_C']:.0f} °C",
                     "Causas": ["Fricción anormal en el rodamiento", "Sobrecarga del motor", "Ventilación obstruida o ambiente caliente"],
                     "Acciones": (["Detener la bomba y dejar enfriar"] if crit else ["Vigilar la tendencia cada pocos minutos"])
                     + ["Comparar con la corriente y la vibración", "Limpiar rejillas de ventilación del motor"]})
     rul = num("RUL_h")
     if rul is not None and rul <= eq["rul_aviso_h"] and est not in ("DETENIDA", "MANTENIMIENTO"):
-        out.append({"Falla": "Vida remanente del rodamiento baja", "Gravedad": 2 if rul <= eq["rul_aviso_h"] / 4 else 1,
-                    "Evidencia": f"RUL ≈ {rul:.0f} h (aviso a {eq['rul_aviso_h']:.0f} h)",
+        out.append({"Falla": "Poca vida útil restante del rodamiento", "Gravedad": 2 if rul <= eq["rul_aviso_h"] / 4 else 1,
+                    "Evidencia": f"Vida útil restante ≈ {rul:.0f} h (aviso a {eq['rul_aviso_h']:.0f} h)",
                     "Causas": ["El rodamiento se acerca al final de su vida útil"],
                     "Acciones": ["Programar el cambio de rodamiento en «Mantenimiento»", "Confirmar repuesto y fecha de parada"]})
     zv, vmax = num("zona_vib"), num("Vib_max")
@@ -814,7 +865,6 @@ def estado_mantenimiento(mant: dict) -> pd.DataFrame:
                 restos.append(dd / int(t["Cada_dias"]))
                 textos.append(f"vence en {dd} días" if dd >= 0 else f"vencida hace {-dd} días")
             else:
-                restos.append(0.1)
                 textos.append("sin registro previo")
         if t.get("Cada_horas"):
             if t.get("Ultima_horas") is not None:
@@ -822,13 +872,12 @@ def estado_mantenimiento(mant: dict) -> pd.DataFrame:
                 restos.append(h / float(t["Cada_horas"]))
                 textos.append(f"faltan {h:.0f} h" if h >= 0 else f"vencida por {-h:.0f} h")
             else:
-                restos.append(0.1)
                 textos.append("sin registro previo")
-        if restos:
-            m = min(restos)
+        if True:
+            m = min(restos) if restos else None
             filas.append({"Tarea": t["Tarea"], "Frecuencia": " / ".join(x for x in [
                 f"cada {t['Cada_dias']} días" if t.get("Cada_dias") else "", f"cada {t['Cada_horas']} h" if t.get("Cada_horas") else ""] if x),
-                "Última vez": t.get("Ultima_fecha") or "—", "Estado": ", ".join(textos), "nivel": 2 if m < 0 else 1 if m <= 0.15 else 0})
+                "Última vez": t.get("Ultima_fecha") or "—", "Estado": ", ".join(textos), "nivel": 3 if m is None else 2 if m < 0 else 1 if m <= 0.15 else 0})
     return pd.DataFrame(filas, columns=["Tarea", "Frecuencia", "Última vez", "Estado", "nivel"])
 
 
@@ -861,10 +910,10 @@ def mensaje_alerta(f: dict, diags: list[dict], prefijo: str = "") -> str:
               f"{html.escape(str(f.get('timestamp', '')))} | Estado: <b>{html.escape(NOMBRE_ESTADO.get(f.get('estado'), str(f.get('estado'))))}</b>"]
     t = f.get("temperatura_motor_C")
     if t is not None and not pd.isna(t):
-        lineas.append(f"Temperatura IR: {t:.1f} °C ({c_a_f(t):.1f} °F)")
+        lineas.append(f"Temperatura del rodamiento: {c_a_f(t):.1f} °F ({t:.1f} °C)")
     rul = f.get("RUL_h")
     if rul is not None and not pd.isna(rul):
-        lineas.append(f"RUL del rodamiento: {rul:.0f} h")
+        lineas.append(f"Vida útil restante del rodamiento: {rul:.0f} h")
     lineas.append("")
     for d in diags[:3]:
         lineas.append(f"{'🔴' if d['Gravedad'] == 2 else '🟡'} <b>{html.escape(d['Falla'])}</b>")
