@@ -29,6 +29,10 @@ ARCH_MANT = BASE / "mantenimiento.json"
 ARCH_HIST_ROD = BASE / "historial_rodamientos.json"
 
 DOCENTE = "Ing. Wilson Sánchez Ocaña"
+INTEGRANTES = ["Chicaiza Keveen", "Arellano Jhan", "Ruiz Adrian", "Aguilar Leonel"]
+ASIGNATURA = "PLC Interfaces de Comunicación"
+NRC = "35624"
+PERIODO = "Octubre 2026 – Febrero 2027"
 G = 9.80665
 ORIGEN_BASE = "Datos recolectados"
 ORIGEN_NUEVO = "Registro nuevo"

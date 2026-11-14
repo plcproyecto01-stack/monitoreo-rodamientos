@@ -187,7 +187,10 @@ def cargar_equipo() -> dict:
         datos = {k: v for k, v in datos.items() if k in ("operadores", "asignatura", "nrc", "periodo", "proyecto")}
         datos = {**N.DEF_EQUIPO, **datos, "version": 5}
         N.guardar_json(N.ARCH_EQUIPO, datos)
-    return {**N.DEF_EQUIPO, **(datos or {}), "version": 5}
+    return {**N.DEF_EQUIPO, **(datos or {}), "version": 5,
+            # integrantes y asignatura fijos
+            "operadores": [{"Nombre": x, "Función": ""} for x in N.INTEGRANTES],
+            "asignatura": N.ASIGNATURA, "nrc": N.NRC, "periodo": N.PERIODO}
 
 
 def cargar_catalogo() -> list:
@@ -1312,25 +1315,15 @@ if nav == "🔔 Alertas":
 # ⚙️ Configuración
 # =============================================================================
 if nav == "⚙️ Configuración":
-    st.subheader("Operadores y asignatura")
-    intro("Guarda los datos del grupo y los límites que usa la aplicación para dar alarmas.",
-          "Agrega a los integrantes en la tabla (botón +). Los límites ya tienen valores recomendados; cámbialos solo si es necesario.")
-    st.markdown(f"**Docente responsable:** {N.DOCENTE}")
-    k = f"ops_{st.session_state.editor_ver}"
-    oe = st.data_editor(pd.DataFrame(equipo.get("operadores", []), columns=["Nombre", "Función"]), num_rows="dynamic", hide_index=True, width="stretch", key=k,
-                        column_config={"Función": st.column_config.SelectboxColumn("Función", options=["Coordinador", "Operador de ensayo", "Registro de datos", "Instrumentación", "Análisis del modelo"])})
-    cam = st.session_state.get(k, {})
-    if cam and (cam.get("edited_rows") or cam.get("added_rows") or cam.get("deleted_rows")):
-        equipo["operadores"] = [o for o in oe.fillna("").to_dict("records") if str(o.get("Nombre", "")).strip()]
-        N.guardar_json(N.ARCH_EQUIPO, equipo)
-        st.session_state.editor_ver += 1
-        st.rerun()
+    st.subheader("Datos del proyecto")
+    intro("Muestra los datos del grupo y guarda los límites que usa la aplicación para dar alarmas.",
+          "Los integrantes y la asignatura ya están fijos. Los límites técnicos tienen valores recomendados; cámbialos solo si es necesario.")
+    st.markdown(f"""<div class="caja"><h4>Grupo de trabajo</h4>{tabla_valores([
+        ("Docente responsable", N.DOCENTE), ("Asignatura", N.ASIGNATURA), ("NRC", N.NRC), ("Período", N.PERIODO)], 2)}
+<p style="margin:.6rem 0 .2rem;color:#5A6B88">Integrantes</p><ul style="margin:0 0 0 1.2rem">{"".join(f"<li><b>{html.escape(x)}</b></li>" for x in N.INTEGRANTES)}</ul></div>""",
+                unsafe_allow_html=True)
     with st.form("form_cfg"):
-        c = st.columns([3, 1, 1])
         e = dict(equipo)
-        e["asignatura"] = c[0].text_input("Asignatura", e.get("asignatura", ""))
-        e["nrc"] = c[1].text_input("NRC", e.get("nrc", ""))
-        e["periodo"] = c[2].text_input("Período", e.get("periodo", ""))
         e["proyecto"] = st.text_area("Título del proyecto", e.get("proyecto", ""), height=70)
         st.markdown("**Límites y datos técnicos**")
         c = st.columns(4)
@@ -1432,7 +1425,8 @@ def generar_informe() -> bytes:
     tit(equipo["proyecto"], 0)
     p = doc.add_paragraph()
     p.add_run("Universidad de las Fuerzas Armadas ESPE – Sede Latacunga\n").bold = True
-    p.add_run(f"Departamento de Eléctrica y Electrónica | Ingeniería Electromecánica\nDocente responsable: {N.DOCENTE}\n")
+    p.add_run(f"Departamento de Eléctrica y Electrónica | Ingeniería Electromecánica\nDocente responsable: {N.DOCENTE}\n"
+              f"Asignatura: {N.ASIGNATURA} | NRC {N.NRC} | Período: {N.PERIODO}\n")
     p.add_run("Operadores: " + (", ".join(o["Nombre"] for o in equipo.get("operadores", []) if o.get("Nombre")) or "—") + "\n")
     p.add_run(f"Fecha: {datetime.now():%Y-%m-%d %H:%M}")
     tit("1. Datos analizados")
