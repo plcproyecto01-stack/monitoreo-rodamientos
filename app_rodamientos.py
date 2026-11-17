@@ -8,6 +8,7 @@ datos_prueba/ (datos recolectados), catalogos/ (hojas de datos).
 Ejecutar en la PC:  python -m streamlit run app_rodamientos.py
 """
 import base64
+import re
 import html
 import json
 import math
@@ -30,6 +31,7 @@ st.set_page_config(page_title="ESPE | Monitoreo Goulds 3642", page_icon=str(_ICO
 
 import nucleo as N  # noqa: E402
 import informe_transmisor as IT  # noqa: E402,F401
+import informe_general as IG  # noqa: E402,F401
 from estilos import CSS  # noqa: E402
 
 PALETA = ["#1F6FEB", "#0A1F44", "#00A3FF", "#F2B705", "#5B8DEF", "#8A9BB8", "#0D3B8C"]
@@ -82,6 +84,7 @@ def temp_u(t_f):
 
 
 def intro(para_que: str, que_hacer: str) -> None:
+    para_que, que_hacer = (re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", x) for x in (para_que, que_hacer))
     st.markdown(f"""<div class="intro"><div><span class="etq">¿Para qué sirve?</span>{para_que}</div>
 <div><span class="etq">¿Qué hago aquí?</span>{que_hacer}</div></div>""", unsafe_allow_html=True)
 
@@ -1214,8 +1217,6 @@ Su instalación es más compleja (cabezal + caja electrónica).</p>
             st.dataframe(pd.DataFrame([("BYD", "Marca BIEDAS, termómetro infrarrojo fijo"), ("10", "Rango 0 a 100 °C"),
                                        ("A", "Salida 4–20 mA"), ("S", "Cuerpo corto: 71 mm de largo, rosca M18×1 de 32,85 mm")],
                                       columns=["Parte", "Significado"]), hide_index=True, width="stretch")
-            st.warning("**Antes de comprar:** confirmar con el vendedor el largo del cuerpo (71 mm, versión S) y el plazo de entrega. "
-                       "**Al instalar:** la emisividad es fija (0,95), así que hay que pegar cinta negra mate en el punto de medición.")
 
         st.subheader("4. Instalación y conexión al PLC")
         if el["Modelo"] == N.TX_COMPRA:
@@ -1447,118 +1448,13 @@ if nav == "⚙️ Configuración":
 # 📄 Informe
 # =============================================================================
 def generar_informe() -> bytes:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from docx import Document
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Cm, Pt, RGBColor
-
-    figs = []
-
-    def fig_png(fig):
-        b = BytesIO()
-        fig.tight_layout()
-        fig.savefig(b, format="png", dpi=160)
-        plt.close(fig)
-        return b.getvalue()
-
-    op = dbase[dbase["estado_bomba"] == 1]
-    fig, ax = plt.subplots(figsize=(7.2, 3.4))
-    for e in N.ESTADOS:
-        s = op[op["estado"] == e]
-        if len(s):
-            ax.scatter(pd.to_datetime(s["timestamp"]), s["T_F"], s=4, color=N.COLOR_ESTADO[e], label=N.NOMBRE_ESTADO[e])
-    ax.set_ylabel("°F"), ax.legend(fontsize=6, markerscale=3), ax.grid(alpha=.3), ax.set_title("Temperatura del rodamiento (sensor IR) por estado")
-    figs.append(("La temperatura del escudo sube cuando el rodamiento se degrada.", fig_png(fig)))
-    fig, ax = plt.subplots(figsize=(7.2, 3.4))
-    ax.scatter(op["caudal_GPM"], op["NPSHa_m"], s=4, label="NPSHa (data, nivel del mar)")
-    ax.scatter(op["caudal_GPM"], op["NPSHa_lat_m"], s=4, label="NPSHa en Latacunga")
-    ax.plot(N.CURVA["Q_gpm"], N.CURVA["NPSHr_m"], color="#D64545", lw=2, label="NPSHr fabricante")
-    ax.set_xlim(20, 40), ax.set_xlabel("Caudal (GPM)"), ax.set_ylabel("m"), ax.legend(fontsize=7), ax.grid(alpha=.3), ax.set_title("Efecto de la altitud en el NPSH")
-    figs.append(("A 2750 m el NPSH disponible baja cerca de 3 m.", fig_png(fig)))
-    cm = modelos["matriz"]
-    fig, ax = plt.subplots(figsize=(5.8, 5))
-    ax.imshow(cm, cmap="Blues")
-    et = [N.NOMBRE_ESTADO[c] for c in modelos["clases"]]
-    ax.set_xticks(range(len(et))), ax.set_xticklabels(et, rotation=45, ha="right", fontsize=7), ax.set_yticks(range(len(et))), ax.set_yticklabels(et, fontsize=7)
-    for i in range(len(et)):
-        for j in range(len(et)):
-            ax.text(j, i, cm[i, j], ha="center", va="center", fontsize=8)
-    ax.set_title("Matriz de confusión del MLP (prueba)")
-    figs.append(("Clasificación del estado de falla con variables medibles.", fig_png(fig)))
-    cr = modelos["curva_rul"]
-    fig, ax = plt.subplots(figsize=(7.2, 3.2))
-    ax.plot(cr["horas"], cr["RUL real"], label="Vida útil real (recortada a 800 h)"), ax.plot(cr["horas"], cr["RUL MLP"], alpha=.7, label="Calculada por la IA")
-    ax.set_xlabel("Horas de operación"), ax.set_ylabel("h"), ax.legend(), ax.grid(alpha=.3), ax.set_title("Vida remanente del rodamiento")
-    figs.append(("La vida útil restante solo se puede calcular cuando empieza el desgaste.", fig_png(fig)))
-
-    doc = Document()
-    doc.styles["Normal"].font.name, doc.styles["Normal"].font.size = "Calibri", Pt(11)
-    tl = doc.add_table(rows=1, cols=2)
-    tl.autofit = False
-    tl.cell(0, 0).width, tl.cell(0, 1).width = Cm(12.6), Cm(4)
-    for celda, nom, w in ((tl.cell(0, 0), "logo_espe.png", 8), (tl.cell(0, 1), "logo_em.png", 2.4)):
-        if (BASE / nom).exists():
-            celda.paragraphs[0].add_run().add_picture(str(BASE / nom), width=Cm(w))
-    tl.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    def tit(t, n=1):
-        h = doc.add_heading(t, level=n)
-        for r_ in h.runs:
-            r_.font.color.rgb = RGBColor(0x0A, 0x1F, 0x44)
-
-    def tabla(filas, enc):
-        t = doc.add_table(rows=1, cols=len(enc))
-        t.style = "Light Grid Accent 1"
-        for i, v in enumerate(enc):
-            t.rows[0].cells[i].text = str(v)
-        for f in filas:
-            cs = t.add_row().cells
-            for i, v in enumerate(f):
-                cs[i].text = str(v)
-        doc.add_paragraph()
-
-    tit(equipo["proyecto"], 0)
-    p = doc.add_paragraph()
-    p.add_run("Universidad de las Fuerzas Armadas ESPE – Sede Latacunga\n").bold = True
-    p.add_run(f"Departamento de Eléctrica y Electrónica | Ingeniería Electromecánica\nDocente responsable: {N.DOCENTE}\n"
-              f"Asignatura: {N.ASIGNATURA} | NRC {N.NRC} | Período: {N.PERIODO}\n")
-    p.add_run("Operadores: " + (", ".join(o["Nombre"] for o in equipo.get("operadores", []) if o.get("Nombre")) or "—") + "\n")
-    p.add_run(f"Fecha: {datetime.now():%Y-%m-%d %H:%M}")
-    tit("1. Datos analizados")
-    doc.add_paragraph(f"Datos recolectados de la bomba Goulds 3642: {len(dbase)} registros horarios, {int((dbase['estado_bomba'] == 1).sum())} h en operación. "
-                      f"Registros nuevos: {len(dreg)}.")
-    cnt = dbase["estado_txt"].value_counts()
-    tabla([(k, v, f"{v / len(dbase) * 100:.1f} %") for k, v in cnt.items()], ["Estado", "Horas", "%"])
-    tit("2. Resultados")
-    for i, (txt, img) in enumerate(figs, 1):
-        doc.add_picture(BytesIO(img), width=Cm(15 if i != 3 else 11))
-        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        doc.add_paragraph(f"Figura {i}. {txt}").runs[0].italic = True
-    tit("3. Modelos")
-    tabla([("MLP estado (esta app)", f"F1 macro {modelos['f1']:.3f}"), ("MLP vida útil (esta app)", f"MAE {modelos['mae']:.1f} h; R² {modelos['r2']:.3f}"),
-           ("MLP / LSTM de referencia (TensorFlow)", "F1 0,966 / 0,646; RUL R² 0,962 / 0,993")], ["Modelo", "Resultado"])
-    if modelo_activo:
-        _ef, _ec = N.ecuaciones(modelo_activo)
-        pe = doc.add_paragraph("Modelo matemático de la temperatura del rodamiento:\n")
-        pe.add_run(_ef + "\n" + _ec).bold = True
-        doc.add_paragraph("Donde: " + N.leyenda_ecuacion(modelo_activo) + ". " + N.lectura_ecuacion(modelo_activo))
-        doc.add_paragraph(f"R² = {modelo_activo['r2']:.3f}; RMSE = {modelo_activo['rmse_F']:.2f} °F.")
-    tit("4. Selección del transmisor IR")
-    tabla([(x["Modelo"], "Sí" if x["Cumple todo"] else "No", x["Punto medido (mm)"], x["Puntaje"], x["No cumple"]) for x in tabla_ir.to_dict("records")],
-          ["Modelo", "Cumple", "Punto (mm)", "Puntaje", "No cumple"])
-    doc.add_paragraph(f"Transmisor seleccionado para la compra: BIEDAS {N.TX_COMPRA} (0–100 °C, 4–20 mA, D:S 20:1, IP65), conectado a un módulo "
-                      f"SM 1231 AI4 y escalado de 0–27648 a 0–100 °C. Alternativa técnica: Optris {N.TX_ALTERNATIVA}. El detalle completo está en el "
-                      "informe de selección del transmisor.")
-    b = BytesIO()
-    doc.save(b)
-    return b.getvalue()
+    import informe_general as IG
+    return IG.generar(dbase, dreg, equipo, modelos, modelo_activo, catalogo, req_ir, tabla_ir, N.estado_mantenimiento(mant), BASE)
 
 
 if nav == "📄 Informe":
     st.subheader("Informe automático en Word")
-    intro("Genera un documento Word con los resultados: datos, gráficas, modelo matemático, inteligencia artificial y transmisor recomendado.",
+    intro("Genera el informe técnico completo en Word: equipo, datos, análisis hidráulico, térmico, de vibraciones y eléctrico, modelo matemático, estado de falla y vida útil, diagnóstico, mantenimiento, transmisor y aplicación, con gráficas y explicaciones.",
           "Pulsa «Generar informe» y luego «Descargar informe».")
     if st.button("Generar informe", type="primary"):
         try:
