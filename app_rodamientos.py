@@ -29,6 +29,7 @@ _ICONO = BASE / "logo_em.png"
 st.set_page_config(page_title="ESPE | Monitoreo Goulds 3642", page_icon=str(_ICONO) if _ICONO.exists() else "⚡", layout="wide")
 
 import nucleo as N  # noqa: E402
+import informe_transmisor as IT  # noqa: E402,F401
 from estilos import CSS  # noqa: E402
 
 PALETA = ["#1F6FEB", "#0A1F44", "#00A3FF", "#F2B705", "#5B8DEF", "#8A9BB8", "#0D3B8C"]
@@ -146,13 +147,13 @@ def ficha_datasheet(c: dict) -> str:
     filas = [("Fabricante", c["Marca"]), ("Modelo", c["Modelo"]), ("Tipo", c["Tipo"]),
              ("Rango", f"{c['T_min_C']} a {c['T_max_C']} °C"), ("Relación óptica D:S", f"{fmt(c['DS'], 2 if float(c['DS']) % 1 else 0)} : 1"),
              ("Tiempo de respuesta", f"{c['Resp_ms']} ms"),
+             ("Repetibilidad", f"±{fmt(c['Repet_C'])} °C" if c.get("Repet_C") else "Ver hoja de datos"),
              ("Exactitud", f"±{fmt(c['Exact_C'])} °C" + (f" o ±{fmt(c['Exact_pct'])} % (el mayor)" if c.get("Exact_pct") else "")),
              ("Emisividad", f"{fmt(c['Emis_min'], 2)} fija" if c["Emis_max"] == c["Emis_min"] else f"ajustable {fmt(c['Emis_min'], 2)}–{fmt(c['Emis_max'], 2)}"),
              ("Salidas", c["Salidas"]), ("Alimentación", f"{fmt(c['V_min'])} – {fmt(c['V_max'])} VDC"),
-             ("T. ambiente del cabezal", f"{c.get('Tcab_C')} °C"), ("T. ambiente de la electrónica", f"{c.get('Telec_C')} °C"),
+             ("Temperatura ambiente máx. del sensor", f"{c.get('Tcab_C')} °C"), ("Temperatura ambiente máx. de la electrónica", f"{c.get('Telec_C')} °C"),
              ("Protección", f"IP{int(c['IP'])}" if c.get("IP") else "No indicado en el folleto"), ("Montaje", c["Montaje"]),
-             ("Proveedor en Ecuador", c.get("Proveedor") or "Importación"),
-             ("Precio", f"USD {fmt(c['Precio_USD'], 2)}" if c.get("Precio_USD") else "Solicitar cotización"), ("Notas", c.get("Notas", ""))]
+             ("Proveedor / fabricante", c.get("Proveedor") or "Importación"), ("Notas", c.get("Notas", ""))]
     return '<table class="ds">' + "".join(f"<tr><th>{html.escape(k)}</th><td>{html.escape(str(v))}</td></tr>" for k, v in filas) + "</table>"
 
 
@@ -183,11 +184,14 @@ if CLAVE_APP and not st.session_state.get("autenticado"):
 
 def cargar_equipo() -> dict:
     datos = N.cargar_json(N.ARCH_EQUIPO, {})
-    if datos and datos.get("version") != 5:  # versión anterior: conservar solo lo ingresado por el usuario
-        datos = {k: v for k, v in datos.items() if k in ("operadores", "asignatura", "nrc", "periodo", "proyecto")}
-        datos = {**N.DEF_EQUIPO, **datos, "version": 5}
+    if datos and datos.get("version") == 5:  # versión 5: conservar los límites, renovar los criterios del transmisor
+        datos = {**{k: v for k, v in datos.items() if not k.startswith("ir_")}, "version": 6}
+        N.guardar_json(N.ARCH_EQUIPO, {**N.DEF_EQUIPO, **datos})
+    elif datos and datos.get("version") != 6:  # versiones anteriores: conservar solo lo ingresado por el usuario
+        datos = {k: v for k, v in datos.items() if k in ("proyecto",)}
+        datos = {**N.DEF_EQUIPO, **datos, "version": 6}
         N.guardar_json(N.ARCH_EQUIPO, datos)
-    return {**N.DEF_EQUIPO, **(datos or {}), "version": 5,
+    return {**N.DEF_EQUIPO, **(datos or {}), "version": 6,
             # integrantes y asignatura fijos
             "operadores": [{"Nombre": x, "Función": ""} for x in N.INTEGRANTES],
             "asignatura": N.ASIGNATURA, "nrc": N.NRC, "periodo": N.PERIODO}
@@ -195,7 +199,7 @@ def cargar_equipo() -> dict:
 
 def cargar_catalogo() -> list:
     c = N.cargar_json(N.ARCH_CATALOGO, None)
-    if isinstance(c, dict) and c.get("version") == 5:
+    if isinstance(c, dict) and c.get("version") == 6:
         return c["items"]
     return json.loads(json.dumps(N.CATALOGO_DEF))
 
@@ -366,8 +370,7 @@ if nav == "🏠 Inicio":
           "Solo revisar. Entra a cada parte con los botones del menú. El selector °F / °C de la barra lateral cambia las unidades de toda la aplicación.")
     st.subheader("Ruta del proyecto")
     opb = dbase[dbase["estado_bomba"] == 1]
-    ok_ir = tabla_ir[tabla_ir["Cumple todo"]] if len(tabla_ir) else tabla_ir
-    sel = next((c for c in catalogo if len(ok_ir) and c["Modelo"] == ok_ir.iloc[0]["Modelo"]), None)
+    sel = next((c for c in catalogo if c["Modelo"] == N.TX_COMPRA), None)
     eq_f, eq_c = N.ecuaciones(modelo_activo)
     err_u = modelo_activo["rmse_F"] if U() == "°F" else modelo_activo["rmse_F"] / 1.8
     st.markdown(f"""<div class="ruta">
@@ -379,9 +382,9 @@ if nav == "🏠 Inicio":
 <div class="big">Acierta el {fmt(modelo_activo['r2'] * 100, 0)} % · error ±{fmt(err_u, 1)} {U()}</div>
 <p class="eq">{html.escape(eq_f)}<br>{html.escape(eq_c)}</p>
 <p style="font-size:.8rem">{html.escape(N.leyenda_ecuacion(modelo_activo))}</p></div>
-<div class="paso fin"><span class="n">3</span><h4>Transmisor IR seleccionado</h4>
+<div class="paso fin"><span class="n">3</span><h4>Transmisor IR seleccionado para la compra</h4>
 <div class="big">{html.escape(sel['Marca'] + ' ' + sel['Modelo']) if sel else 'Ninguno cumple'}</div>
-<p>{f"Mide de {sel['T_min_C']} a {sel['T_max_C']} °C · óptica {fmt(sel['DS'], 0)}:1 · salida {sel['Salidas'].split(';')[0]} · soporta {sel['Tcab_C']} °C en el cabezal" if sel else 'Revisar criterios'}</p>
+<p>{f"Mide de {sel['T_min_C']} a {sel['T_max_C']} °C · óptica {fmt(sel['DS'], 0)}:1 · salida {sel['Salidas'].split(';')[0]} · soporta {sel['Tcab_C']} °C de ambiente" if sel else 'Revisar criterios'}</p>
 <p>Temperatura máxima registrada: {temp(N.c_a_f(req_ir['t_max_obs_C'])) if req_ir['t_max_obs_C'] else '—'}.</p></div>
 </div>""", unsafe_allow_html=True)
     st.subheader("Estado actual del equipo")
@@ -1115,80 +1118,174 @@ if nav == "🧮 Calculadora de temperatura":
 # 🌡️ Transmisor IR
 # =============================================================================
 if nav == "🌡️ Transmisor IR":
-    intro("Elige el transmisor de temperatura infrarrojo que se debe comprar para vigilar los rodamientos. Compara los modelos de los catálogos "
-          "con los requisitos que salen de los datos recolectados y de la instalación.",
-          "Revisa los criterios (si no sabes qué poner, deja los valores recomendados) y mira el resultado en «2. Evaluación del catálogo» "
-          "y el transmisor recomendado con su hoja de datos.")
+    intro("Elige el transmisor de temperatura infrarrojo que se va a comprar para vigilar los rodamientos. Compara los modelos de los "
+          "catálogos con los requisitos que salen de los datos recolectados y de la instalación, y muestra cómo instalarlo y conectarlo al PLC.",
+          "Revisa los criterios (si no sabes qué poner, deja los valores recomendados), mira la evaluación y el resultado. "
+          "Al final puedes generar el **informe de selección completo en Word**.")
     st.subheader("1. Criterios de selección")
-    st.dataframe(pd.DataFrame([
-        ("Rango de medición", "Temperaturas mínima y máxima que puede leer el sensor.", "Debe cubrir la temperatura más alta del rodamiento con margen.", "0 a 150 °C"),
-        ("Relación óptica D:S", "Distancia ÷ diámetro de la zona que mide. 15:1 = a 15 cm mide un círculo de 1 cm.", "La tapa del rodamiento es pequeña; si el círculo es más grande, mide también el fondo.", "15:1 o más"),
-        ("T. ambiente del cabezal", "Temperatura máxima que soporta la cabeza del sensor junto al motor.", "El motor es abierto y expulsa aire caliente.", "85 °C o más"),
-        ("Tiempo de respuesta", "Cuánto tarda el sensor en mostrar un cambio.", "El rodamiento se calienta en minutos; cualquier sensor rápido sirve.", "150 ms o menos"),
-        ("Exactitud", "Cuántos grados puede equivocarse el sensor.", "Debe ser menor que la diferencia entre operación normal y desgaste.", "±2 °C"),
-        ("Salida", "Tipo de señal eléctrica que entrega el sensor al PLC.", "4–20 mA no se afecta por el largo del cable.", "4–20 mA"),
-        ("Diámetro de la tapa y distancia", "Tamaño de la zona útil del rodamiento y a qué distancia se montará el sensor.", "Con ellos se calcula el tamaño del círculo que mide.", "30 mm a 120 mm")],
-        columns=["Criterio", "Qué significa", "Por qué importa", "Valor recomendado"]), hide_index=True, width="stretch")
-    with st.form("form_ir"):
-        st.caption("Si no sabes qué poner, deja los valores recomendados.")
-        c = st.columns(4)
-        e = {}
-        e["ir_rango_max_C"] = c[0].number_input("Temperatura máxima a medir (°C)", value=float(equipo["ir_rango_max_C"]), help="Recomendado: 150 °C.")
-        e["ir_ds_min"] = c[1].number_input("Relación óptica D:S mínima", value=float(equipo["ir_ds_min"]), help="Recomendado: 15 (es decir 15:1).")
-        e["ir_cabezal_min_C"] = c[2].number_input("Temperatura que debe soportar el cabezal (°C)", value=float(equipo["ir_cabezal_min_C"]), help="Recomendado: 85 °C.")
-        e["ir_resp_max_ms"] = c[3].number_input("Tiempo de respuesta máximo (ms)", value=float(equipo["ir_resp_max_ms"]), help="Recomendado: 150 ms.")
-        c = st.columns(4)
-        e["ir_salida"] = c[0].selectbox("Tipo de salida", ["4–20 mA", "0–10 V"], index=["4–20 mA", "0–10 V"].index(equipo["ir_salida"]),
-                                        help="4–20 mA (recomendado) necesita el módulo SM 1231 en el PLC; 0–10 V entra directo a la CPU 1214C.")
-        e["ir_exactitud_C"] = c[1].number_input("Exactitud mínima (± °C)", value=float(equipo["ir_exactitud_C"]), step=0.5, help="Recomendado: 2 °C.")
-        e["ir_d_objetivo_mm"] = c[2].number_input("Diámetro útil de la tapa del rodamiento (mm)", value=float(equipo["ir_d_objetivo_mm"]),
-                                                  help="Mídelo con un calibrador o regla en la tapa del motor. Recomendado: 30 mm.")
-        e["ir_distancia_mm"] = c[3].number_input("Distancia de montaje del sensor (mm)", value=float(equipo["ir_distancia_mm"]),
-                                                 help="A qué distancia de la tapa se colocará el sensor. Recomendado: 100 a 150 mm.")
-        if st.form_submit_button("Guardar criterios", type="primary"):
-            N.guardar_json(N.ARCH_EQUIPO, {**equipo, **e})
-            st.session_state["msg"] = "Criterios guardados"
-            st.rerun()
     r = req_ir
-    st.caption(f"Con estos criterios: rango de {fmt(r['rango_min_C'], 0)} a {fmt(r['rango_max_C'], 0)} °C (la máxima registrada fue {temp(N.c_a_f(r['t_max_obs_C'])) if r['t_max_obs_C'] else '—'}); "
-               f"el círculo medido debe ser de {fmt(r['spot_max_mm'])} mm o menos a {fmt(r['distancia_mm'], 0)} mm, por eso se pide D:S ≥ {fmt(r['ds_req'])}:1.")
-    st.subheader("2. Evaluación del catálogo")
-    st.caption("✔ = cumple el criterio · ✘ = no cumple. «Punto medido» es el diámetro del círculo que mide el sensor a la distancia de montaje.")
+    st.dataframe(pd.DataFrame([
+        ("Rango de medición", "Temperaturas mínima y máxima que puede leer el sensor.", f"0 a {fmt(r['rango_max_C'], 0)} °C",
+         f"La máxima registrada fue {fmt(r['t_max_obs_C'])} °C y el disparo está en {fmt(equipo['disparo_C'], 0)} °C."),
+        ("Relación óptica D:S", "Distancia ÷ diámetro del círculo que mide. 20:1 = a 20 cm mide un círculo de 1 cm.", f"{fmt(r['ds_req'], 0)}:1 o más",
+         "La tapa del rodamiento es pequeña; si el círculo es más grande, mide también el fondo."),
+        ("Punto medido", "Diámetro del círculo que mide el sensor a la distancia de montaje.", f"{fmt(r['spot_max_mm'])} mm o menos",
+         f"Debe ocupar como máximo 2/3 de la tapa ({fmt(equipo['ir_d_objetivo_mm'], 0)} mm × 2/3)."),
+        ("Tiempo de respuesta", "Cuánto tarda el sensor en mostrar un cambio.", f"{fmt(r['resp_ms'], 0)} ms o menos",
+         "El rodamiento se calienta en minutos; un segundo es más que suficiente."),
+        ("Temperatura ambiente del sensor", "Temperatura máxima del aire que soporta el sensor.", f"{fmt(r['cabezal_C'], 0)} °C o más",
+         "El motor está diseñado para 40 °C de ambiente; se suman 10 °C de margen."),
+        ("Exactitud", "Cuántos grados puede equivocarse el sensor.", f"±{fmt(r['exactitud_C'], 0)} °C",
+         "Mucho menor que la diferencia entre operación normal y rodamiento crítico (≈ 15 °C)."),
+        ("Salida", "Tipo de señal eléctrica que entrega el sensor al PLC.", r["salida"], "No se afecta por el largo del cable y permite detectar un cable roto."),
+        ("Alimentación y protección", "Voltaje de la fuente y protección contra polvo y agua.", f"{fmt(r['alim_V'], 0)} VDC · IP{r['ip_min']} o más",
+         "Fuente del tablero del PLC; instalación junto a una bomba de agua.")],
+        columns=["Criterio", "Qué significa", "Valor exigido", "Por qué"]), hide_index=True, width="stretch")
+    with st.expander("Cambiar los criterios (si no sabes qué poner, deja los valores recomendados)"):
+        with st.form("form_ir"):
+            c = st.columns(4)
+            e = {}
+            e["ir_rango_max_C"] = c[0].number_input("Temperatura máxima a medir (°C)", value=float(equipo["ir_rango_max_C"]), help="Recomendado: 100 °C.")
+            e["ir_ds_min"] = c[1].number_input("Relación óptica D:S mínima", value=float(equipo["ir_ds_min"]), help="Recomendado: 15 (es decir 15:1).")
+            e["ir_cabezal_min_C"] = c[2].number_input("Temperatura ambiente que debe soportar (°C)", value=float(equipo["ir_cabezal_min_C"]), help="Recomendado: 50 °C.")
+            e["ir_resp_max_ms"] = c[3].number_input("Tiempo de respuesta máximo (ms)", value=float(equipo["ir_resp_max_ms"]), help="Recomendado: 1000 ms.")
+            c = st.columns(4)
+            e["ir_salida"] = c[0].selectbox("Tipo de salida", ["4–20 mA", "0–10 V"], index=["4–20 mA", "0–10 V"].index(equipo["ir_salida"]),
+                                            help="4–20 mA (recomendado) necesita el módulo SM 1231 en el PLC; 0–10 V entra directo a la CPU 1214C.")
+            e["ir_exactitud_C"] = c[1].number_input("Exactitud mínima (± °C)", value=float(equipo["ir_exactitud_C"]), step=0.5, help="Recomendado: 2 °C.")
+            e["ir_d_objetivo_mm"] = c[2].number_input("Diámetro útil de la tapa del rodamiento (mm)", value=float(equipo["ir_d_objetivo_mm"]),
+                                                      help="Mídelo con un calibrador en la tapa del motor. Recomendado: 30 mm.")
+            e["ir_distancia_mm"] = c[3].number_input("Distancia de montaje del sensor (mm)", value=float(equipo["ir_distancia_mm"]),
+                                                     help="Distancia entre la lente y la tapa. Recomendado: 100 a 150 mm.")
+            if st.form_submit_button("Guardar criterios", type="primary"):
+                N.guardar_json(N.ARCH_EQUIPO, {**equipo, **e})
+                st.session_state["msg"] = "Criterios guardados"
+                st.rerun()
+
+    st.subheader("2. Evaluación de los transmisores")
+    st.caption("✔ = cumple · ✘ = no cumple. «Punto medido» es el diámetro del círculo que mide el sensor a la distancia de montaje "
+               "(para el BIEDAS se usa la tabla óptica del fabricante). La comparación es técnica: el costo no se incluye.")
     st.dataframe(tabla_ir.drop(columns=["Marca"]), hide_index=True, width="stretch",
-                 column_config={"Puntaje": st.column_config.ProgressColumn("Puntaje", min_value=0, max_value=100, format="%.0f")})
-    ok = tabla_ir[tabla_ir["Cumple todo"]]
-    if len(ok):
-        el = next(c for c in catalogo if c["Modelo"] == ok.iloc[0]["Modelo"])
-        st.markdown(f"""<div class="recomendado"><div class="k">Transmisor recomendado</div><h2>{html.escape(el['Marca'])} {html.escape(el['Modelo'])}</h2>
-<span class="badge">Puntaje {fmt(ok.iloc[0]['Puntaje'], 0)}</span><span class="badge">D:S {fmt(el['DS'], 0)}:1</span><span class="badge">Cabezal {el['Tcab_C']} °C</span>
-<p style="margin:.7rem 0 0;color:#E3EEFF">Cumple todos los criterios de selección; mide un punto de {fmt(ok.iloc[0]['Punto medido (mm)'])} mm a {fmt(r['distancia_mm'], 0)} mm.
-Se recomiendan dos unidades (rodamientos DE y NDE) y un PT100 de contacto como referencia de calibración.</p></div>""", unsafe_allow_html=True)
-        ca, cb = st.columns([3, 2])
-        ca.markdown(ficha_datasheet(el), unsafe_allow_html=True)
-        with cb:
-            pdf = N.DIR_CATALOGOS / el.get("PDF", "")
-            if el.get("PDF") and pdf.exists():
-                st.download_button(f"📄 Descargar datasheet ({pdf.name})", pdf.read_bytes(), pdf.name, "application/pdf")
-                if hasattr(st, "pdf"):
-                    try:
-                        st.pdf(str(pdf), height=480)
-                    except Exception:
-                        pass
-            st.info("**Conexión al S7-1200 CPU 1214C** (entradas integradas solo 0–10 V):\n\n"
-                    "- **Recomendado:** módulo **SM 1231 AI** (4 u 8 canales) o **SB 1231 AI**; 4–20 mA → 5530 a 27648. Escalar con NORM_X y SCALE_X y vigilar "
-                    "valores bajo 5530 (cable roto).\n- **Alternativa:** salida 0–10 V a la entrada integrada (X12), 0 a 27648, resolución de 10 bits.\n"
-                    "- Configurar en el transmisor un rango de salida de 0–150 °C y emisividad 0,95 sobre cinta mate.")
+                 column_config={"Puntaje": st.column_config.ProgressColumn("Puntaje técnico", min_value=0, max_value=100, format="%.0f")})
+    with st.expander("¿Por qué se descartan los demás?"):
+        for c in catalogo:
+            fallas = N.explicar_fallas(c, r)
+            if fallas:
+                st.markdown(f"**{c['Marca'].split(' (')[0]} {c['Modelo']}:** " + " ".join(fallas))
+        st.caption("Puntaje técnico (desempate entre los que cumplen): exactitud 30, holgura de la óptica 25, emisividad ajustable 15, "
+                   "protección IP 10, resolución de la señal 10 y accesorios de montaje incluidos 10.")
+
+    st.subheader("3. Resultado de la selección")
+    tx_c = next((c for c in catalogo if c["Modelo"] == N.TX_COMPRA), None)
+    tx_a = next((c for c in catalogo if c["Modelo"] == N.TX_ALTERNATIVA), None)
+    fila_c = tabla_ir[tabla_ir["Modelo"] == N.TX_COMPRA]
+    if tx_c is None:
+        st.error("El transmisor seleccionado no está en el catálogo. Pulsa «Restaurar catálogo original» al final de esta sección.")
+    else:
+        cumple_c = bool(len(fila_c) and fila_c.iloc[0]["Cumple todo"])
+        ca, cb = st.columns(2)
+        ca.markdown(f"""<div class="recomendado"><div class="k">🛒 Transmisor seleccionado para la compra</div>
+<h2>{html.escape(tx_c['Marca'].split(' (')[0])} {html.escape(tx_c['Modelo'])}</h2>
+<span class="badge">{tx_c['T_min_C']}–{tx_c['T_max_C']} °C</span><span class="badge">4–20 mA</span><span class="badge">D:S {fmt(tx_c['DS'], 0)}:1</span><span class="badge">IP{tx_c['IP']}</span>
+<p style="margin:.7rem 0 0;color:#E3EEFF">{'Cumple todos los criterios.' if cumple_c else 'Revisar: no cumple algún criterio con los valores actuales.'}
+Rango ajustado al proceso, óptica 20:1 (a {fmt(r['distancia_mm'], 0)} mm mide {fmt(N.punto_medido(tx_c, r['distancia_mm']))} mm), salida 4–20 mA robusta al ruido del motor,
+y trae soporte en L, tuercas y cable apantallado.</p></div>""", unsafe_allow_html=True)
+        if tx_a:
+            cb.markdown(f"""<div class="caja" style="border-left:6px solid #2E9E5B"><h4>⭐ Alternativa técnica: {html.escape(tx_a['Marca'])} {html.escape(tx_a['Modelo'])}</h4>
+<p>También cumple todos los criterios, con <b>mejor exactitud (±1 °C)</b>, <b>emisividad ajustable</b>, display y salida de alarma.
+Su instalación es más compleja (cabezal + caja electrónica).</p>
+<p><b>Conviene</b> si no se puede pegar cinta mate en la tapa, si se necesita más exactitud o si el ambiente supera 60 °C.</p></div>""",
+                        unsafe_allow_html=True)
+        opciones_tx = [N.TX_COMPRA] + ([N.TX_ALTERNATIVA] if tx_a else [])
+        ver = st.radio("Ver la ficha, la instalación y la conexión de:", opciones_tx, horizontal=True,
+                       format_func=lambda m: f"🛒 {m} (compra)" if m == N.TX_COMPRA else f"⭐ {m} (alternativa)")
+        el = tx_c if ver == N.TX_COMPRA else tx_a
+        cx, cy = st.columns([3, 2])
+        cx.markdown(ficha_datasheet(el), unsafe_allow_html=True)
+        with cy:
+            if el["Modelo"] == N.TX_COMPRA and (N.DIR_CATALOGOS / "BYD_producto.jpg").exists():
+                st.image(str(N.DIR_CATALOGOS / "BYD_producto.jpg"), caption="BIEDAS con soporte en L (imagen del fabricante)")
+            for clave_pdf, txt in (("PDF", "📄 Hoja de datos / manual"), ("PDF2", "🌐 Página del producto")):
+                pdf = N.DIR_CATALOGOS / str(el.get(clave_pdf) or "")
+                if el.get(clave_pdf) and pdf.exists():
+                    st.download_button(f"{txt} ({pdf.name})", pdf.read_bytes(), pdf.name, "application/pdf", key=f"dl_{clave_pdf}_{el['Modelo']}")
+        if el["Modelo"] == N.TX_COMPRA:
+            st.markdown("**Código de pedido BYD10AS**")
+            st.dataframe(pd.DataFrame([("BYD", "Marca BIEDAS, termómetro infrarrojo fijo"), ("10", "Rango 0 a 100 °C"),
+                                       ("A", "Salida 4–20 mA"), ("S", "Cuerpo corto: 71 mm de largo, rosca M18×1 de 32,85 mm")],
+                                      columns=["Parte", "Significado"]), hide_index=True, width="stretch")
+            st.warning("**Antes de comprar:** confirmar con el vendedor el largo del cuerpo (71 mm, versión S) y el plazo de entrega. "
+                       "**Al instalar:** la emisividad es fija (0,95), así que hay que pegar cinta negra mate en el punto de medición.")
+
+        st.subheader("4. Instalación y conexión al PLC")
+        if el["Modelo"] == N.TX_COMPRA:
+            c1, c2 = st.columns(2)
+            if (N.DIR_CATALOGOS / "BYD_optica.png").exists():
+                c1.image(str(N.DIR_CATALOGOS / "BYD_optica.png"), caption="Círculo medido según la distancia (fabricante)")
+            if (N.DIR_CATALOGOS / "BYD_soporte.png").exists():
+                c2.image(str(N.DIR_CATALOGOS / "BYD_soporte.png"), caption="Soporte en L incluido (41,8 × 43,7 mm)")
+            st.markdown(f"**Montaje:** lente a **{fmt(r['distancia_mm'], 0)} mm** de la tapa, perpendicular a ella, siempre al mismo punto y con cinta negra mate. "
+                        f"A esa distancia mide un círculo de **{fmt(N.punto_medido(el, r['distancia_mm']))} mm**. No colocarlo frente a la salida de aire del ventilador.")
+            st.markdown("**Cables (conexión a 4 hilos, según el manual):**")
+            st.dataframe(pd.DataFrame([("🔴 Rojo", "+ alimentación 9–32 VDC", "+24 VDC de la fuente"), ("⚫ Negro", "− alimentación", "0 V (M)"),
+                                       ("🔵 Azul", "Señal 4–20 mA (+)", "AI0+ del módulo SM 1231 AI4"), ("🟠 Naranja", "Señal 4–20 mA (−)", "AI0− del módulo"),
+                                       ("⚪ Plateado", "Pantalla del cable", "Tierra (PE), solo del lado del tablero")],
+                                      columns=["Cable", "Función", "Se conecta a"]), hide_index=True, width="stretch")
+            st.caption("También admite 3 hilos (negro y naranja juntos como común) o 2 hilos (solo rojo +24 V y azul 4–20 mA).")
+            st.markdown("**Escalado en TIA Portal** (canal del SM 1231 configurado como *Intensidad, 4..20 mA*): "
+                        "NORM_X (MIN = 0, MAX = 27648) → SCALE_X (MIN = 0,0, MAX = 100,0) → temperatura en °C; °F = 1,8·°C + 32.")
+            filas_e = []
+            for ma in (4, 8, 12, 16, 20):
+                tc = (ma - 4) / 16 * 100
+                filas_e.append((ma, int(round((ma - 4) / 16 * 27648)), int(round(ma / 20 * 27648)), fmt(tc), fmt(N.c_a_f(tc))))
+            st.dataframe(pd.DataFrame(filas_e, columns=["Corriente (mA)", "Valor PLC (canal 4..20 mA)", "Valor PLC (canal 0..20 mA)", "°C", "°F"]),
+                         hide_index=True, width="stretch")
+            st.caption("Un valor negativo (canal 4..20 mA) o menor a 5530 (canal 0..20 mA) indica cable roto o sensor sin alimentación. "
+                       "Sobre 100 °C la señal se satura en 20 mA: tratarlo como disparo.")
+        else:
+            st.markdown("**Montaje:** el cabezal M12 se fija con su tuerca o soporte apuntando a la tapa; la caja electrónica va en un lugar protegido. "
+                        "La emisividad se ajusta en la caja (0,95 con cinta mate o el valor de la pintura).")
+            st.markdown("**Conexión:** salida 4–20 mA de la caja electrónica al canal AI0 del SM 1231 AI4, alimentada con 24 VDC; programar la salida "
+                        "a 0–100 °C para usar el mismo escalado (NORM_X 0–27648 → SCALE_X 0–100 °C). Ver bornes en la hoja de datos de Optris.")
+
+        st.subheader("5. Informe de selección del transmisor")
+        st.write("Genera un documento Word completo y explicado: objetivos, condiciones del proceso, criterios con sus cálculos, especificaciones "
+                 "y evaluación de todos los transmisores, razones de descarte, cálculo del punto de medición, transmisor seleccionado y alternativa, "
+                 "instalación, conexión al PLC, escalado en TIA Portal, validación, mantenimiento, lista de materiales y conclusiones.")
+        if st.button("📄 Generar informe de selección", type="primary", key="gen_sel"):
+            try:
+                import informe_transmisor as IT
+                with st.spinner("Generando el informe (unos segundos)..."):
+                    st.session_state["informe_sel"] = IT.generar(dbase, equipo, catalogo, req_ir, tabla_ir, BASE)
+            except ImportError:
+                st.error("Falta python-docx o matplotlib.")
+        if st.session_state.get("informe_sel"):
+            st.download_button("⬇️ Descargar informe de selección (.docx)", st.session_state["informe_sel"],
+                               f"Informe_Seleccion_Transmisor_IR_{datetime.now():%Y%m%d}.docx",
+                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_sel")
+
     st.dataframe(pd.DataFrame(N.PORTATILES), hide_index=True, width="stretch")
-    with st.expander("Editar catálogo (precios, cotizaciones, modelos nuevos)"):
+    with st.expander("Editar el catálogo (agregar o corregir modelos)"):
         k = f"cat_{st.session_state.editor_ver}"
-        ce = st.data_editor(pd.DataFrame(catalogo), num_rows="dynamic", hide_index=True, width="stretch", key=k)
+        listas = ("Spot_D_mm", "Spot_S_mm")
+        vista_cat = pd.DataFrame([{kk: v for kk, v in x.items() if kk not in listas} for x in catalogo])
+        ce = st.data_editor(vista_cat, num_rows="dynamic", hide_index=True, width="stretch", key=k)
         cam = st.session_state.get(k, {})
         if cam and (cam.get("edited_rows") or cam.get("added_rows") or cam.get("deleted_rows")):
-            N.guardar_json(N.ARCH_CATALOGO, {"version": 5, "items": [{kk: N.limpio(v) for kk, v in x.items()} for x in ce.to_dict("records") if x.get("Modelo")]})
+            orig = {x["Modelo"]: x for x in catalogo}
+            nuevos = []
+            for x in ce.to_dict("records"):
+                if x.get("Modelo"):
+                    item = {kk: N.limpio(v) for kk, v in x.items()}
+                    for l_ in listas:
+                        if l_ in orig.get(item["Modelo"], {}):
+                            item[l_] = orig[item["Modelo"]][l_]
+                    nuevos.append(item)
+            N.guardar_json(N.ARCH_CATALOGO, {"version": 6, "items": nuevos})
             st.session_state.editor_ver += 1
             st.rerun()
         if st.button("Restaurar catálogo original"):
-            N.guardar_json(N.ARCH_CATALOGO, {"version": 5, "items": N.CATALOGO_DEF})
+            N.guardar_json(N.ARCH_CATALOGO, {"version": 6, "items": N.CATALOGO_DEF})
             st.rerun()
 
 # =============================================================================
@@ -1451,9 +1548,9 @@ def generar_informe() -> bytes:
     tit("4. Selección del transmisor IR")
     tabla([(x["Modelo"], "Sí" if x["Cumple todo"] else "No", x["Punto medido (mm)"], x["Puntaje"], x["No cumple"]) for x in tabla_ir.to_dict("records")],
           ["Modelo", "Cumple", "Punto (mm)", "Puntaje", "No cumple"])
-    if len(tabla_ir) and tabla_ir["Cumple todo"].any():
-        doc.add_paragraph(f"Transmisor recomendado: {tabla_ir.iloc[0]['Marca']} {tabla_ir.iloc[0]['Modelo']}, dos unidades (DE y NDE), conectadas a un SM 1231 AI "
-                          "(4–20 mA → 5530–27648) y un PT100 de contacto como referencia.")
+    doc.add_paragraph(f"Transmisor seleccionado para la compra: BIEDAS {N.TX_COMPRA} (0–100 °C, 4–20 mA, D:S 20:1, IP65), conectado a un módulo "
+                      f"SM 1231 AI4 y escalado de 0–27648 a 0–100 °C. Alternativa técnica: Optris {N.TX_ALTERNATIVA}. El detalle completo está en el "
+                      "informe de selección del transmisor.")
     b = BytesIO()
     doc.save(b)
     return b.getvalue()
@@ -1472,6 +1569,19 @@ if nav == "📄 Informe":
     if st.session_state.get("informe"):
         st.download_button("📄 Descargar informe (.docx)", st.session_state["informe"], f"Informe_Goulds3642_{datetime.now():%Y%m%d_%H%M}.docx",
                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    st.subheader("Informe de selección del transmisor IR")
+    st.write("Documento detallado y explicado de cómo se eligió el transmisor BIEDAS BYD10AS: criterios, comparación, instalación, conexión y escalado.")
+    if st.button("Generar informe de selección", key="gen_sel2"):
+        try:
+            import informe_transmisor as IT
+            with st.spinner("Generando..."):
+                st.session_state["informe_sel"] = IT.generar(dbase, equipo, catalogo, req_ir, tabla_ir, BASE)
+        except ImportError:
+            st.error("Falta python-docx o matplotlib.")
+    if st.session_state.get("informe_sel"):
+        st.download_button("⬇️ Descargar informe de selección (.docx)", st.session_state["informe_sel"],
+                           f"Informe_Seleccion_Transmisor_IR_{datetime.now():%Y%m%d}.docx",
+                           "application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_sel2")
     st.subheader("Respaldo")
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -1517,6 +1627,9 @@ if nav == "📖 Glosario":
         ("Factor de potencia (FP)", "Qué parte de la energía que toma el motor se convierte en trabajo útil (de 0 a 1)."),
         ("PLC S7-1200 / SM 1231", "Controlador que leerá el transmisor. Su CPU 1214C solo lee 0–10 V; para 4–20 mA se agrega el módulo SM 1231."),
         ("PT100", "Sensor de temperatura de contacto, muy exacto; sirve como referencia para comprobar el sensor IR."),
+        ("Código BYD10AS", "Nombre del transmisor elegido: BYD = marca BIEDAS, 10 = rango de 0 a 100 °C, A = salida 4–20 mA, S = cuerpo corto de 71 mm."),
+        ("Saturación del sensor", "Cuando la temperatura supera el máximo del rango (100 °C en el BYD10AS), la señal se queda en 20 mA y el PLC lee 100 °C aunque esté más caliente."),
+        ("NORM_X y SCALE_X", "Instrucciones de TIA Portal que convierten el número que entrega el PLC (0 a 27648) en temperatura."),
     ]
     for t, dfn in G:
         if not busca or busca.lower() in (t + dfn).lower():

@@ -185,8 +185,8 @@ DEF_EQUIPO = {
     # Límites (las alarmas de rodamiento suelen estar entre 75 y 90 °C)
     "alarma_C": 75.0, "disparo_C": 90.0, "iso_A": 1.4, "iso_B": 2.8, "iso_C": 4.5, "rul_aviso_h": 200.0,
     # Requisitos del transmisor IR
-    "ir_rango_min_C": 0.0, "ir_rango_max_C": 150.0, "ir_ds_min": 15.0, "ir_cabezal_min_C": 85.0,
-    "ir_resp_max_ms": 150.0, "ir_salida": "4–20 mA", "ir_alimentacion_V": 24.0, "ir_ip_min": 65,
+    "ir_rango_min_C": 0.0, "ir_rango_max_C": 100.0, "ir_ds_min": 15.0, "ir_cabezal_min_C": 50.0,
+    "ir_resp_max_ms": 1000.0, "ir_salida": "4–20 mA", "ir_alimentacion_V": 24.0, "ir_ip_min": 65,
     "ir_d_objetivo_mm": 30.0, "ir_distancia_mm": 120.0, "ir_exactitud_C": 2.0,
 }
 
@@ -762,43 +762,55 @@ def analisis_cavitacion(hp, hz_placa, rpm_placa, hz_vfd, z, fundacion, rpm_real,
 # =============================================================================
 # Transmisor IR: catálogo y evaluación con los criterios de selección
 # =============================================================================
+TX_COMPRA = "BYD10AS"        # transmisor seleccionado para la compra
+TX_ALTERNATIVA = "CT LT22"   # alternativa técnica
+
 CATALOGO_DEF = [
+    {"Marca": "BIEDAS (Wuxi Baiyida)", "Modelo": "BYD10AS", "Tipo": "Termómetro infrarrojo fijo M18, versión corta",
+     "T_min_C": 0, "T_max_C": 100, "DS": 20.0, "Resp_ms": 200, "Exact_C": 2.0, "Exact_pct": 1.5, "Repet_C": 1.0,
+     "Emis_min": 0.95, "Emis_max": 0.95, "Salidas": "4–20 mA", "V_min": 9.0, "V_max": 32.0, "Tcab_C": 60, "Telec_C": 60,
+     "IP": 65, "Montaje": "Rosca M18×1, cuerpo de 71 mm, 2 tuercas + soporte en L incluido, cable apantallado de 2 m",
+     "Proveedor": "Fabricante: Wuxi Baiyida Electromechanical Technology Co., Ltd. (China)", "Local": False,
+     "PDF": "BIEDAS_BYD_manual.pdf", "PDF2": "BIEDAS_BYD10AS_pagina_web.pdf",
+     "Spot_D_mm": [0, 100, 300, 600, 1000], "Spot_S_mm": [11, 13, 20, 30, 50],
+     "Notas": "Código: BYD = serie, 10 = 0–100 °C, A = salida 4–20 mA, S = versión corta (71 mm). Espectro 8–14 µm. "
+              "Respuesta configurable de fábrica 50 ms–5 s. Garantía 12 meses."},
     {"Marca": "Optris", "Modelo": "CT LT22", "Tipo": "Cabezal + caja electrónica con display", "T_min_C": -50, "T_max_C": 975,
      "DS": 22.0, "Resp_ms": 150, "Exact_C": 1.0, "Exact_pct": 1.0, "Emis_min": 0.1, "Emis_max": 1.1,
      "Salidas": "4–20 mA; 0–20 mA; 0–5 V; 0–10 V; termopar J/K", "V_min": 8.0, "V_max": 36.0, "Tcab_C": 180, "Telec_C": 85,
-     "IP": 65, "Montaje": "Cabezal M12 + caja electrónica", "Proveedor": "", "Local": False, "Precio_USD": None,
+     "IP": 65, "Montaje": "Cabezal M12 + caja electrónica", "Proveedor": "", "Local": False,
      "PDF": "Optris_CT_LT_datasheet.pdf", "Notas": "Rango de salida programable (p. ej. 0–150 °C). Display y salida de alarma."},
     {"Marca": "Optris", "Modelo": "CT LT15", "Tipo": "Cabezal + caja electrónica con display", "T_min_C": -50, "T_max_C": 600,
      "DS": 15.0, "Resp_ms": 150, "Exact_C": 1.0, "Exact_pct": 1.0, "Emis_min": 0.1, "Emis_max": 1.1,
      "Salidas": "4–20 mA; 0–20 mA; 0–5 V; 0–10 V; termopar J/K", "V_min": 8.0, "V_max": 36.0, "Tcab_C": 180, "Telec_C": 85,
-     "IP": 65, "Montaje": "Cabezal M12 + caja electrónica", "Proveedor": "", "Local": False, "Precio_USD": None,
+     "IP": 65, "Montaje": "Cabezal M12 + caja electrónica", "Proveedor": "", "Local": False,
      "PDF": "Optris_CT_LT_datasheet.pdf", "Notas": "Rango de salida programable. Display y salida de alarma."},
     {"Marca": "Optris", "Modelo": "CThot LT10H", "Tipo": "Cabezal + caja electrónica (ambiente caliente)", "T_min_C": -40, "T_max_C": 975,
      "DS": 10.0, "Resp_ms": 100, "Exact_C": 1.5, "Exact_pct": 1.0, "Emis_min": 0.1, "Emis_max": 1.1,
      "Salidas": "4–20 mA; 0–20 mA; 0–5 V; 0–10 V; termopar J/K", "V_min": 8.0, "V_max": 36.0, "Tcab_C": 250, "Telec_C": 85,
-     "IP": 65, "Montaje": "Cabezal + caja electrónica", "Proveedor": "", "Local": False, "Precio_USD": None,
+     "IP": 65, "Montaje": "Cabezal + caja electrónica", "Proveedor": "", "Local": False,
      "PDF": "Optris_CThot_LT_datasheet.pdf", "Notas": "Para ambientes muy calientes; sobredimensionado."},
     {"Marca": "Optris", "Modelo": "CSmicro LT15 (versión mA)", "Tipo": "Transmisor M12, electrónica en cable", "T_min_C": -50, "T_max_C": 1030,
      "DS": 15.0, "Resp_ms": 14, "Exact_C": 1.0, "Exact_pct": 1.0, "Emis_min": 0.1, "Emis_max": 1.1, "Salidas": "4–20 mA",
      "V_min": 5.0, "V_max": 30.0, "Tcab_C": 120, "Telec_C": 75, "IP": None, "Montaje": "Rosca M12×1", "Proveedor": "",
-     "Local": False, "Precio_USD": None, "PDF": "optris-product-brochure.pdf", "Notas": "IP no indicado en el folleto consultado."},
+     "Local": False, "PDF": "optris-product-brochure.pdf", "Notas": "IP no indicado en el folleto consultado."},
     {"Marca": "Optris", "Modelo": "CSmicro LT15 HS", "Tipo": "Transmisor M18 a 2 hilos", "T_min_C": -20, "T_max_C": 150,
      "DS": 15.0, "Resp_ms": 150, "Exact_C": 1.0, "Exact_pct": 1.0, "Emis_min": 0.1, "Emis_max": 1.1, "Salidas": "4–20 mA",
      "V_min": 5.0, "V_max": 30.0, "Tcab_C": 75, "Telec_C": 75, "IP": None, "Montaje": "Rosca M18×1", "Proveedor": "",
-     "Local": False, "Precio_USD": None, "PDF": "optris-product-brochure.pdf", "Notas": "Alta sensibilidad; cabezal hasta 75 °C."},
+     "Local": False, "PDF": "optris-product-brochure.pdf", "Notas": "Alta sensibilidad; cabezal hasta 75 °C."},
     {"Marca": "Optris", "Modelo": "CS LT", "Tipo": "Transmisor M12 una pieza", "T_min_C": -40, "T_max_C": 1030,
      "DS": 15.0, "Resp_ms": 25, "Exact_C": 1.5, "Exact_pct": 1.5, "Emis_min": 0.1, "Emis_max": 1.1, "Salidas": "0–5 V; 0–10 V; termopar K",
      "V_min": 5.0, "V_max": 30.0, "Tcab_C": 80, "Telec_C": 80, "IP": None, "Montaje": "Rosca M12×1", "Proveedor": "",
-     "Local": False, "Precio_USD": None, "PDF": "optris-product-brochure.pdf", "Notas": "Salida 0–10 V directa a la CPU 1214C."},
+     "Local": False, "PDF": "optris-product-brochure.pdf", "Notas": "Salida 0–10 V directa a la CPU 1214C."},
     {"Marca": "OPTEX-FA / HTM Sensors", "Modelo": "SA-80T-2A", "Tipo": "Transmisor M18", "T_min_C": 0, "T_max_C": 200,
      "DS": 6.25, "Resp_ms": 100, "Exact_C": 2.0, "Exact_pct": 0.0, "Emis_min": 0.95, "Emis_max": 0.95, "Salidas": "4–20 mA",
      "V_min": 10.8, "V_max": 26.4, "Tcab_C": 70, "Telec_C": 70, "IP": 67, "Montaje": "Rosca M18×1, cable 2 m",
-     "Proveedor": "POTENTA Ecuador, código 111431001", "Local": True, "Precio_USD": None, "PDF": "OPTEX-FA_SA-80_datasheet.pdf",
+     "Proveedor": "POTENTA Ecuador, código 111431001", "Local": True, "PDF": "OPTEX-FA_SA-80_datasheet.pdf",
      "Notas": "Campo de visión ø80 mm a 500 mm. Emisividad fija 0,95. Carga máx. del lazo 250 Ω."},
     {"Marca": "OPTEX-FA / HTM Sensors", "Modelo": "SA-80T-4A", "Tipo": "Transmisor M18", "T_min_C": 0, "T_max_C": 400,
      "DS": 6.25, "Resp_ms": 100, "Exact_C": 2.0, "Exact_pct": 1.0, "Emis_min": 0.95, "Emis_max": 0.95, "Salidas": "4–20 mA",
      "V_min": 10.8, "V_max": 26.4, "Tcab_C": 70, "Telec_C": 70, "IP": 67, "Montaje": "Rosca M18×1, cable 2 m",
-     "Proveedor": "POTENTA Ecuador, código 111431002", "Local": True, "Precio_USD": None, "PDF": "OPTEX-FA_SA-80_datasheet.pdf", "Notas": ""},
+     "Proveedor": "POTENTA Ecuador, código 111431002", "Local": True, "PDF": "OPTEX-FA_SA-80_datasheet.pdf", "Notas": ""},
 ]
 PORTATILES = [
     {"Equipo": "PT100 de contacto + SM 1231 RTD", "Uso": "Referencia para calibrar y validar el IR "},
@@ -806,10 +818,17 @@ PORTATILES = [
 ]
 
 
+def punto_medido(c: dict, distancia_mm: float) -> float:
+    """Diámetro del círculo que mide el sensor a una distancia. Usa la tabla óptica del fabricante si existe."""
+    if c.get("Spot_D_mm") and c.get("Spot_S_mm"):
+        return float(np.interp(distancia_mm, c["Spot_D_mm"], c["Spot_S_mm"]))
+    return float(distancia_mm) / float(c["DS"])
+
+
 def requisitos_ir(d: pd.DataFrame, eq: dict) -> dict:
     t = d.loc[d["estado_bomba"] == 1, "temperatura_motor_C"].dropna()
     t_max = float(t.max()) if len(t) else None
-    rango_max = max(float(eq["ir_rango_max_C"]), (t_max or 0) + 20, float(eq["disparo_C"]) + 20)
+    rango_max = max(float(eq["ir_rango_max_C"]), float(eq["disparo_C"]), t_max or 0)
     spot_max = float(eq["ir_d_objetivo_mm"]) / 1.5
     ds_geo = float(eq["ir_distancia_mm"]) / spot_max
     return {"t_max_obs_C": t_max, "t_p95_C": float(np.percentile(t, 95)) if len(t) else None,
@@ -817,27 +836,68 @@ def requisitos_ir(d: pd.DataFrame, eq: dict) -> dict:
             "ds_req": max(float(eq["ir_ds_min"]), ds_geo), "ds_geo": ds_geo, "spot_max_mm": spot_max,
             "resp_ms": float(eq["ir_resp_max_ms"]), "cabezal_C": float(eq["ir_cabezal_min_C"]), "exactitud_C": float(eq["ir_exactitud_C"]),
             "salida": eq["ir_salida"], "alim_V": float(eq["ir_alimentacion_V"]), "ip_min": int(eq["ir_ip_min"]),
-            "distancia_mm": float(eq["ir_distancia_mm"])}
+            "distancia_mm": float(eq["ir_distancia_mm"]), "t_ref_C": float(eq["disparo_C"])}
+
+
+CRITERIOS_IR = ["Rango", "D:S", "Punto medido", "Respuesta", "T. ambiente", "Exactitud", "Salida", "Alimentación", "IP"]
+
+
+def exactitud_efectiva(c: dict, t_ref_C: float = 90.0) -> float:
+    """Exactitud del fabricante evaluada en la temperatura de disparo («el mayor de ±X °C o ±Y %»)."""
+    return max(float(c.get("Exact_C") or 0), float(c.get("Exact_pct") or 0) * t_ref_C / 100)
+
+
+def chequeo_ir(c: dict, r: dict) -> dict:
+    exact = exactitud_efectiva(c, r.get("t_ref_C", 90.0))
+    spot = punto_medido(c, r["distancia_mm"])
+    return {"Rango": c["T_min_C"] <= r["rango_min_C"] and c["T_max_C"] >= r["rango_max_C"],
+            "D:S": float(c["DS"]) >= r["ds_req"] - 1e-9, "Punto medido": spot <= r["spot_max_mm"] + 1e-9,
+            "Respuesta": float(c["Resp_ms"]) <= r["resp_ms"], "T. ambiente": float(c.get("Tcab_C") or 0) >= r["cabezal_C"],
+            "Exactitud": exact <= r["exactitud_C"] + 1e-9, "Salida": r["salida"] in str(c["Salidas"]),
+            "Alimentación": c["V_min"] <= r["alim_V"] <= c["V_max"], "IP": (c.get("IP") or 0) >= r["ip_min"]}
+
+
+def explicar_fallas(c: dict, r: dict) -> list[str]:
+    """Explicación en palabras de cada criterio que no cumple un transmisor."""
+    chk, out = chequeo_ir(c, r), []
+    if not chk["Rango"]:
+        out.append(f"Rango: mide de {c['T_min_C']} a {c['T_max_C']} °C y se requiere cubrir de {r['rango_min_C']:.0f} a {r['rango_max_C']:.0f} °C.")
+    if not chk["D:S"]:
+        out.append(f"Óptica: su relación D:S es {c['DS']:g}:1 y se requiere al menos {r['ds_req']:g}:1 para medir solo la tapa del rodamiento.")
+    if not chk["Punto medido"]:
+        out.append(f"Punto medido: a {r['distancia_mm']:.0f} mm mide un círculo de {punto_medido(c, r['distancia_mm']):.1f} mm, mayor al máximo de {r['spot_max_mm']:.1f} mm.")
+    if not chk["Respuesta"]:
+        out.append(f"Respuesta: tarda {c['Resp_ms']} ms y se requiere como máximo {r['resp_ms']:.0f} ms.")
+    if not chk["T. ambiente"]:
+        out.append(f"Temperatura ambiente: el sensor soporta {c.get('Tcab_C')} °C y se requiere al menos {r['cabezal_C']:.0f} °C.")
+    if not chk["Exactitud"]:
+        out.append(f"Exactitud: ±{exactitud_efectiva(c, r.get('t_ref_C', 90.0)):.1f} °C a 90 °C, mayor que ±{r['exactitud_C']:.1f} °C.")
+    if not chk["Salida"]:
+        out.append(f"Salida: ofrece «{c['Salidas']}» y se requiere {r['salida']}.")
+    if not chk["Alimentación"]:
+        out.append(f"Alimentación: acepta {c['V_min']:g}–{c['V_max']:g} VDC y la fuente disponible es de {r['alim_V']:.0f} VDC.")
+    if not chk["IP"]:
+        out.append("Protección: " + (f"IP{int(c['IP'])}" if c.get("IP") else "el grado IP no está indicado en el catálogo consultado")
+                   + f"; se requiere al menos IP{r['ip_min']}.")
+    return out
 
 
 def evaluar_catalogo(cat: list[dict], r: dict) -> pd.DataFrame:
+    """Comparación técnica (sin costo). Puntaje: exactitud 30, holgura óptica 25, emisividad ajustable 15, protección IP 10,
+    resolución de la señal 10 (rango ajustado al proceso) y accesorios de montaje incluidos 10."""
     filas = []
-    precios = [c["Precio_USD"] for c in cat if c.get("Precio_USD")]
     for c in cat:
-        exact = max(float(c.get("Exact_C") or 0), float(c.get("Exact_pct") or 0) * 85 / 100)
-        chk = {"Rango": c["T_min_C"] <= r["rango_min_C"] and c["T_max_C"] >= r["rango_max_C"],
-               "D:S": float(c["DS"]) >= r["ds_req"] - 1e-9, "Respuesta": float(c["Resp_ms"]) <= r["resp_ms"],
-               "Cabezal": float(c.get("Tcab_C") or 0) >= r["cabezal_C"], "Exactitud": exact <= r["exactitud_C"] + 1e-9,
-               "Salida": r["salida"] in str(c["Salidas"]), "Alimentación": c["V_min"] <= r["alim_V"] <= c["V_max"],
-               "IP": (c.get("IP") or 0) >= r["ip_min"]}
+        exact = exactitud_efectiva(c, r.get("t_ref_C", 90.0))
+        chk = chequeo_ir(c, r)
+        span = max(float(c["T_max_C"]) - float(c["T_min_C"]), 1.0)
         p = 30 * min(1.0, r["exactitud_C"] / max(exact, 0.1)) + 25 * min(1.0, float(c["DS"]) / (1.5 * r["ds_req"]))
         p += 15 if c["Emis_max"] > c["Emis_min"] else 0
         p += 10 if (c.get("IP") or 0) >= 67 else 7 if (c.get("IP") or 0) >= 65 else 0
-        p += 10 if c.get("Local") else 0
-        p += 10 * (min(precios) / c["Precio_USD"]) if precios and c.get("Precio_USD") else 5
+        p += 10 * min(1.0, (r["rango_max_C"] - r["rango_min_C"]) / span)
+        p += 10 if "soporte" in str(c.get("Montaje", "")).lower() else 0
         filas.append({"Modelo": c["Modelo"], "Marca": c["Marca"], "Cumple todo": all(chk.values()),
                       **{k: "✔" if v else "✘" for k, v in chk.items()}, "Exactitud (°C)": round(exact, 2),
-                      "Punto medido (mm)": round(r["distancia_mm"] / float(c["DS"]), 1), "Puntaje": round(p, 1),
+                      "Punto medido (mm)": round(punto_medido(c, r["distancia_mm"]), 1), "Puntaje": round(p, 1),
                       "No cumple": ", ".join(k for k, v in chk.items() if not v)})
     t = pd.DataFrame(filas)
     return t.sort_values(["Cumple todo", "Puntaje"], ascending=[False, False]).reset_index(drop=True) if len(t) else t
